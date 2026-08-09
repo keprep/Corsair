@@ -104,5 +104,6 @@ Installation finished.
   Text-mode listing:  corsair-control --list
   Try it without hardware: corsair-control --demo
 
-If no device shows up, unplug and replug it once so the new udev rules apply.
+The udev rules were applied to already-connected devices, so no replugging is
+needed. If nothing shows up, reboot once and run 'corsair-control --list' again.
 EOF

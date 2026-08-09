@@ -115,8 +115,8 @@ Das baut ein richtiges Paket, das `pacman` kennt und mit
 `sudo pacman -R corsair-control` wieder sauber entfernt. PyQt6 und liquidctl
 kommen aus den Distributionspaketen und bleiben so mit dem System aktuell.
 
-Danach **das Gerät einmal ab- und wieder anstecken** (oder neu starten), damit
-die udev-Regeln greifen.
+Die udev-Regeln werden dabei automatisch auch auf bereits angeschlossene
+Geräte angewendet – Abstecken oder Neustart ist normalerweise nicht nötig.
 
 ### Andere Distributionen
 
@@ -145,15 +145,25 @@ sudo install -m 644 packaging/60-corsair-control.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
-Danach das Gerät **einmal ab- und wieder anstecken** (oder neu starten), damit
-die Regeln greifen.
-
 ### Warum udev-Regeln?
 
 USB-HID-Geräte gehören unter Linux standardmäßig root. Ohne Regel bekämst du
 `Permission denied` – oder müsstest das Programm als root starten, was für eine
 GUI keine gute Idee ist. Die mitgelieferte Regel vergibt den Zugriff per
 `uaccess` an den lokal angemeldeten Benutzer.
+
+Neue Regeln gelten zunächst nur für Geräte, die *danach* angeschlossen werden.
+Eine AIO oder ein Commander hängt aber am internen USB-Header im Gehäuse – da
+will niemand zum Umstecken den Rechner aufschrauben. Deshalb reicht:
+
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger --subsystem-match=usb --subsystem-match=hidraw
+```
+
+Das wendet die Regeln auf die bereits angeschlossenen Geräte an. Sowohl
+`install.sh` als auch das Arch-Paket machen das automatisch; ein Neustart ist
+nur der Notnagel, falls es doch nicht greift.
 
 ---
 

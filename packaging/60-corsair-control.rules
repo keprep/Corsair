@@ -3,8 +3,12 @@
 #
 # Install:
 #   sudo cp 60-corsair-control.rules /etc/udev/rules.d/
-#   sudo udevadm control --reload-rules && sudo udevadm trigger
-# Then unplug/replug the device or reboot.
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger --subsystem-match=usb --subsystem-match=hidraw
+#
+# The trigger is what makes this apply to devices that are already connected.
+# A cooler or fan hub hangs off an internal USB header, so replugging it means
+# opening the case - the trigger avoids that. Reboot only if it still fails.
 #
 # TAG+="uaccess" hands access to whoever is logged in on the local seat, which
 # is what you want on a single-user desktop. Replace it with GROUP="plugdev"
