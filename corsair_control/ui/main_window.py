@@ -4,11 +4,20 @@ from __future__ import annotations
 
 import logging
 
-from PyQt6.QtCore import QObject, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QCloseEvent
+from PyQt6.QtCore import (
+    QEasingCurve,
+    QObject,
+    QPropertyAnimation,
+    QSize,
+    Qt,
+    QTimer,
+    pyqtSignal,
+)
+from PyQt6.QtGui import QAction, QCloseEvent, QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -28,12 +37,12 @@ from corsair_control.core.config import Settings
 from corsair_control.core.engine import ControlEngine, Snapshot
 from corsair_control.core.profile import ProfileStore
 from corsair_control.ui.i18n import tr
-from corsair_control.ui.icons import app_icon, tray_icon
+from corsair_control.ui.icons import app_icon, fan_pixmap, glyph_icon, tray_icon
 from corsair_control.ui.pages.dashboard import DashboardPage
 from corsair_control.ui.pages.device_page import DevicePage
 from corsair_control.ui.pages.lighting import LightingPage
 from corsair_control.ui.pages.settings_page import SettingsPage
-from corsair_control.ui.theme import PALETTE, dark_palette, stylesheet
+from corsair_control.ui.theme import PALETTE, dark_palette, set_accent, stylesheet
 from corsair_control.version import APP_NAME, __version__
 
 log = logging.getLogger(__name__)
@@ -62,7 +71,11 @@ class MainWindow(QMainWindow):
         self.store = store
         self.demo = demo
         self.device_pages: dict[str, DevicePage] = {}
+        #: nav row -> stack index; -1 marks a section header
         self._nav_pages: list[int] = []
+        self._nav_items: dict[str, QListWidgetItem] = {}
+        self._current_nav_row = 0
+        self._fade: QPropertyAnimation | None = None
 
         self.setWindowTitle(f"{APP_NAME} {__version__}" + (" — Demo" if demo else ""))
         self.setWindowIcon(app_icon())
@@ -127,6 +140,7 @@ class MainWindow(QMainWindow):
         self.lighting_page.applyRequested.connect(self._apply_lighting)
         self.settings_page = SettingsPage(self.settings)
         self.settings_page.settingsChanged.connect(self._on_settings_changed)
+        self.settings_page.accentChanged.connect(self._on_accent_changed)
         self.settings_page.rescanRequested.connect(self.rescan)
 
     def _build_sidebar(self) -> QWidget:
@@ -137,14 +151,27 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 12)
         layout.setSpacing(0)
 
+        brand = QWidget()
+        brand_layout = QHBoxLayout(brand)
+        brand_layout.setContentsMargins(16, 16, 16, 10)
+        brand_layout.setSpacing(10)
+        logo = QLabel()
+        logo.setPixmap(fan_pixmap(30))
+        brand_layout.addWidget(logo)
+
+        brand_text = QVBoxLayout()
+        brand_text.setSpacing(1)
         title = QLabel(APP_NAME)
         title.setObjectName("SidebarTitle")
-        layout.addWidget(title)
-        subtitle = QLabel(tr("Demo mode - no hardware is being controlled") if self.demo else "")
+        brand_text.addWidget(title)
+        subtitle = QLabel(
+            tr("Demo mode - no hardware is being controlled") if self.demo else f"v{__version__}"
+        )
         subtitle.setObjectName("SidebarSubtitle")
         subtitle.setWordWrap(True)
-        subtitle.setVisible(self.demo)
-        layout.addWidget(subtitle)
+        brand_text.addWidget(subtitle)
+        brand_layout.addLayout(brand_text, 1)
+        layout.addWidget(brand)
 
         profile_wrap = QWidget()
         profile_layout = QVBoxLayout(profile_wrap)
@@ -178,11 +205,16 @@ class MainWindow(QMainWindow):
 
         self.nav = QListWidget()
         self.nav.setObjectName("NavList")
+        self.nav.setIconSize(QSize(18, 18))
+        self.nav.setUniformItemSizes(False)
         self.nav.currentRowChanged.connect(self._on_nav)
         layout.addWidget(self.nav, 1)
 
         self.pause_button = QPushButton(
             tr("Resume control") if self.engine.paused else tr("Pause control")
+        )
+        self.pause_button.setIcon(
+            glyph_icon("play" if self.engine.paused else "pause", PALETTE.text_dim, 18)
         )
         self.pause_button.clicked.connect(self._toggle_pause)
         wrap = QWidget()
@@ -192,6 +224,26 @@ class MainWindow(QMainWindow):
         layout.addWidget(wrap)
 
         return sidebar
+
+    def _nav_header(self, text: str) -> None:
+        """Add a non-selectable section label to the navigation list."""
+        item = QListWidgetItem(text.upper())
+        item.setFlags(Qt.ItemFlag.NoItemFlags)
+        font = QFont(self.font())
+        font.setPointSizeF(max(7.0, self.font().pointSizeF() - 2.0))
+        font.setBold(True)
+        item.setFont(font)
+        item.setForeground(QColor(PALETTE.text_faint))
+        self.nav.addItem(item)
+        self._nav_pages.append(-1)
+
+    def _nav_entry(self, text: str, glyph: str, page: int, key: str | None = None) -> None:
+        item = QListWidgetItem(glyph_icon(glyph, PALETTE.text_dim, 18), text)
+        item.setData(Qt.ItemDataRole.UserRole, glyph)
+        self.nav.addItem(item)
+        self._nav_pages.append(page)
+        if key is not None:
+            self._nav_items[key] = item
 
     def _build_status_bar(self) -> QWidget:
         bar = QWidget()
@@ -205,7 +257,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.status_label, 1)
 
         self.saved_label = QLabel("")
-        self.saved_label.setObjectName("Faint")
+        self.saved_label.setObjectName("Toast")
+        self.saved_label.setVisible(False)
         layout.addWidget(self.saved_label)
 
         self.profile_label = QLabel("")
@@ -247,6 +300,8 @@ class MainWindow(QMainWindow):
     def rebuild_devices(self) -> None:
         self.nav.blockSignals(True)
         self.nav.clear()
+        self._nav_pages.clear()
+        self._nav_items.clear()
         while self.stack.count():
             widget = self.stack.widget(0)
             self.stack.removeWidget(widget)
@@ -256,9 +311,11 @@ class MainWindow(QMainWindow):
         self.device_pages.clear()
 
         self.stack.addWidget(self.dashboard)
-        self.nav.addItem(QListWidgetItem(tr("Dashboard")))
+        self._nav_entry(tr("Dashboard"), "dashboard", 0)
 
         profile = self.store.active
+        if self.engine.devices:
+            self._nav_header(tr("Hardware"))
         for device in self.engine.devices:
             page = DevicePage(
                 device, profile.device(device.key), lambda: self.engine.sensors.sensors
@@ -267,13 +324,16 @@ class MainWindow(QMainWindow):
             page.overrideChanged.connect(self._on_override)
             page.pumpModeChanged.connect(self._on_pump_mode)
             self.device_pages[device.key] = page
+            index = self.stack.count()
             self.stack.addWidget(page)
-            self.nav.addItem(QListWidgetItem(device.short_name))
+            glyph = "pump" if any(c.is_pump for c in device.channels) else "device"
+            self._nav_entry(device.short_name, glyph, index, key=device.key)
 
+        self._nav_header(tr("System"))
         self.stack.addWidget(self.lighting_page)
-        self.nav.addItem(QListWidgetItem(tr("Lighting")))
+        self._nav_entry(tr("Lighting"), "lighting", self.stack.count() - 1)
         self.stack.addWidget(self.settings_page)
-        self.nav.addItem(QListWidgetItem(tr("Settings")))
+        self._nav_entry(tr("Settings"), "settings", self.stack.count() - 1)
 
         self.lighting_page.rebuild(
             self.engine.devices, {d.key: profile.device(d.key) for d in self.engine.devices}
@@ -281,7 +341,8 @@ class MainWindow(QMainWindow):
         self.dashboard.refresh_sensors()
 
         self.nav.blockSignals(False)
-        self.nav.setCurrentRow(0)
+        first = next((row for row, page in enumerate(self._nav_pages) if page >= 0), 0)
+        self.nav.setCurrentRow(first)
 
         self._refresh_profile_box()
         self._show_startup_problems()
@@ -380,8 +441,44 @@ class MainWindow(QMainWindow):
     # engine interaction
     # ------------------------------------------------------------------
     def _on_nav(self, row: int) -> None:
-        if 0 <= row < self.stack.count():
-            self.stack.setCurrentIndex(row)
+        if not 0 <= row < len(self._nav_pages):
+            return
+        page = self._nav_pages[row]
+        if page < 0 or page >= self.stack.count():
+            # Landing on a section header (only reachable programmatically)
+            # would silently drop the highlight, so bounce back.
+            QTimer.singleShot(0, lambda: self.nav.setCurrentRow(self._current_nav_row))
+            return
+        self._current_nav_row = row
+        self.stack.setCurrentIndex(page)
+        self._highlight_nav(row)
+        self._fade_in(self.stack.currentWidget())
+
+    def _highlight_nav(self, current: int) -> None:
+        """Tint the selected entry's icon with the accent colour."""
+        for row in range(self.nav.count()):
+            item = self.nav.item(row)
+            glyph = item.data(Qt.ItemDataRole.UserRole)
+            if not glyph:
+                continue
+            colour = PALETTE.accent if row == current else PALETTE.text_dim
+            item.setIcon(glyph_icon(glyph, colour, 18))
+
+    def _fade_in(self, widget: QWidget | None) -> None:
+        if widget is None:
+            return
+        effect = QGraphicsOpacityEffect(widget)
+        widget.setGraphicsEffect(effect)
+        animation = QPropertyAnimation(effect, b"opacity", self)
+        animation.setDuration(160)
+        animation.setStartValue(0.35)
+        animation.setEndValue(1.0)
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        # Dropping the effect afterwards keeps the widget on the plain paint
+        # path; a lingering QGraphicsEffect costs a full repaint every frame.
+        animation.finished.connect(lambda: widget.setGraphicsEffect(None))
+        self._fade = animation
+        animation.start()
 
     def _on_config_changed(self, device_key: str, channel_id: str) -> None:
         self.engine.config_changed(device_key, channel_id)
@@ -408,12 +505,40 @@ class MainWindow(QMainWindow):
         self.pause_button.setText(
             tr("Resume control") if self.engine.paused else tr("Pause control")
         )
+        self.pause_button.setIcon(
+            glyph_icon(
+                "play" if self.engine.paused else "pause",
+                PALETTE.warn if self.engine.paused else PALETTE.text_dim,
+                18,
+            )
+        )
+
+    def _on_accent_changed(self, colour: str) -> None:
+        self.settings.accent = colour
+        self.settings.save()
+        set_accent(colour)
+        self.setStyleSheet(stylesheet())
+        self.setWindowIcon(app_icon())
+        if self.tray is not None:
+            self.tray.setIcon(tray_icon())
+        # Icons are baked pixmaps, so the pages have to be rebuilt for the new
+        # colour to reach them. It is a rare action, so the cost is fine.
+        row = self.nav.currentRow()
+        self.rebuild_devices()
+        if 0 <= row < self.nav.count():
+            self.nav.setCurrentRow(row)
+        self._toast(tr("Saved"))
 
     def _on_settings_changed(self) -> None:
         self.settings.save()
         self.dashboard.graph.window_seconds = self.settings.history_seconds
-        self.saved_label.setText(tr("Saved"))
-        QTimer.singleShot(1500, lambda: self.saved_label.setText(""))
+        self._toast(tr("Saved"))
+
+    def _toast(self, text: str) -> None:
+        """Brief confirmation in the status bar - no dialog, no interruption."""
+        self.saved_label.setText(text)
+        self.saved_label.setVisible(True)
+        QTimer.singleShot(1800, lambda: self.saved_label.setVisible(False))
 
     # ------------------------------------------------------------------
     def _schedule_save(self) -> None:
@@ -427,16 +552,29 @@ class MainWindow(QMainWindow):
             return
         self.settings.active_profile = self.store.active_name
         self.settings.save()
-        self.saved_label.setText(tr("Saved"))
-        QTimer.singleShot(1500, lambda: self.saved_label.setText(""))
+        self._toast(tr("Saved"))
 
     # ------------------------------------------------------------------
     def _on_snapshot(self, snapshot: Snapshot) -> None:
         self.dashboard.update_from(snapshot)
+        current = self.nav.currentRow()
         for device in snapshot.devices:
             page = self.device_pages.get(device.key)
             if page is not None:
                 page.update_from(device)
+            # A device that dropped off the bus should be visible in the
+            # navigation, not only once its page is open.
+            item = self._nav_items.get(device.key)
+            if item is not None:
+                glyph = item.data(Qt.ItemDataRole.UserRole) or "device"
+                row = self.nav.row(item)
+                if device.error:
+                    colour = PALETTE.bad
+                elif row == current:
+                    colour = PALETTE.accent
+                else:
+                    colour = PALETTE.text_dim
+                item.setIcon(glyph_icon(glyph, colour, 18))
 
         if snapshot.emergency:
             self.status_label.setText(tr("Emergency: maximum cooling"))

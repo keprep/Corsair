@@ -148,9 +148,10 @@ def run_gui(engine: ControlEngine, settings: Settings, store: ProfileStore, args
     from corsair_control.ui.i18n import set_language
     from corsair_control.ui.icons import app_icon
     from corsair_control.ui.main_window import MainWindow
-    from corsair_control.ui.theme import dark_palette
+    from corsair_control.ui.theme import dark_palette, set_accent
 
     set_language(args.lang or settings.extra.get("language", "system"))
+    set_accent(settings.accent)
 
     app = QApplication(sys.argv[:1])
     app.setApplicationName("corsair-control")

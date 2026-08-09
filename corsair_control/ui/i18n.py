@@ -29,6 +29,12 @@ GERMAN: dict[str, str] = {
     "About": "Über",
     # dashboard
     "Temperatures": "Temperaturen",
+    "now": "jetzt",
+    "Accent colour": "Akzentfarbe",
+    "Appearance": "Darstellung",
+    "Overview": "Übersicht",
+    "Hardware": "Hardware",
+    "no device": "kein Gerät",
     "Fans and pumps": "Lüfter und Pumpen",
     "History": "Verlauf",
     "No devices found": "Keine Geräte gefunden",

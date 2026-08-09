@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QFrame,
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QSpinBox,
@@ -18,6 +19,7 @@ from PyQt6.QtWidgets import (
 
 from corsair_control.core.config import Settings, config_dir
 from corsair_control.ui.i18n import tr
+from corsair_control.ui.theme import ACCENTS
 
 
 def _card(title: str) -> tuple[QFrame, QFormLayout]:
@@ -38,8 +40,45 @@ def _card(title: str) -> tuple[QFrame, QFormLayout]:
     return frame, form
 
 
+class AccentPicker(QWidget):
+    """A row of colour dots; the active one gets a ring."""
+
+    accentPicked = pyqtSignal(str)
+
+    def __init__(self, current: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        self._buttons: dict[str, QPushButton] = {}
+
+        for name, colour in ACCENTS.items():
+            button = QPushButton()
+            button.setFixedSize(26, 26)
+            button.setToolTip(name)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(lambda _checked, c=colour: self._pick(c))
+            self._buttons[colour] = button
+            layout.addWidget(button)
+        layout.addStretch(1)
+        self._paint(current)
+
+    def _pick(self, colour: str) -> None:
+        self._paint(colour)
+        self.accentPicked.emit(colour)
+
+    def _paint(self, current: str) -> None:
+        for colour, button in self._buttons.items():
+            ring = "#ffffff" if colour.lower() == current.lower() else "transparent"
+            button.setStyleSheet(
+                f"QPushButton {{ background: {colour}; border-radius: 13px;"
+                f" border: 2px solid {ring}; }}"
+            )
+
+
 class SettingsPage(QWidget):
     settingsChanged = pyqtSignal()
+    accentChanged = pyqtSignal(str)
     rescanRequested = pyqtSignal()
 
     def __init__(self, settings: Settings, parent: QWidget | None = None) -> None:
@@ -98,6 +137,12 @@ class SettingsPage(QWidget):
         general.layout().addWidget(hint)
         layout.addWidget(general)
 
+        appearance, appearance_form = _card(tr("Appearance"))
+        self.accent = AccentPicker(settings.accent)
+        self.accent.accentPicked.connect(self._on_accent)
+        appearance_form.addRow(tr("Accent colour"), self.accent)
+        layout.addWidget(appearance)
+
         safety, safety_form = _card(tr("Safety"))
         self.emergency = QDoubleSpinBox()
         self.emergency.setRange(50.0, 110.0)
@@ -123,6 +168,11 @@ class SettingsPage(QWidget):
         layout.addWidget(tools)
 
         self._loading = False
+
+    def _on_accent(self, colour: str) -> None:
+        # The window owns persistence so that the setting is stored no matter
+        # who triggers the change.
+        self.accentChanged.emit(colour)
 
     def _changed(self) -> None:
         if self._loading:

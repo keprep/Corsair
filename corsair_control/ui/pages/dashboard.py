@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 from corsair_control.core.engine import Snapshot
 from corsair_control.core.sensors import Sensor
 from corsair_control.ui.i18n import tr
+from corsair_control.ui.icons import CATEGORY_GLYPHS
 from corsair_control.ui.theme import PALETTE, temperature_colour
 from corsair_control.ui.widgets.gauge import Bar, Gauge
 from corsair_control.ui.widgets.graph import HistoryGraph
@@ -153,8 +154,12 @@ class DashboardPage(QWidget):
         for index, sensor in enumerate(sensors):
             gauge = self._gauges.get(sensor.sensor_id)
             if gauge is None:
-                gauge = Gauge(title=sensor.label.split(" · ")[0], unit="°C")
-                gauge.setMinimumSize(120, 126)
+                gauge = Gauge(
+                    title=sensor.label.split(" · ")[0],
+                    unit="°C",
+                    glyph=CATEGORY_GLYPHS.get(sensor.category),
+                )
+                gauge.setMinimumSize(120, 132)
                 self._gauges[sensor.sensor_id] = gauge
                 self.gauge_grid.addWidget(gauge, 0, index)
         self.graph.set_series_keys([(s.sensor_id, s.label.split(" · ")[0]) for s in sensors])

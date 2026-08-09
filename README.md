@@ -9,6 +9,8 @@ Hintergrund, der die Kurven auch ohne offenes Fenster weiterfährt.
 
 ![Kurven-Editor](docs/screenshot-curves.png)
 
+![Einstellungen](docs/screenshot-settings.png)
+
 ---
 
 ## Was es macht
@@ -32,6 +34,8 @@ Hintergrund, der die Kurven auch ohne offenes Fenster weiterfährt.
 * **Notfallabschaltung nach oben**: ab einer einstellbaren Temperatur
   (Vorgabe 90 °C) gehen alle Kanäle auf 100 %, unabhängig von der Kurve.
 * **Beleuchtung**: statische Farbe und die Modi, die der jeweilige Treiber meldet.
+* **Optik**: dunkles Thema mit wählbarer Akzentfarbe, animierte Anzeigen,
+  Verlaufsdiagramm mit Fadenkreuz beim Überfahren.
 * **Hintergrunddienst** (`corsair-controld`) mit systemd-Unit, damit die Kurven
   schon vor dem Login laufen.
 * **Demo-Modus** (`--demo`) mit simulierter AIO und simuliertem Commander Pro –
@@ -208,7 +212,7 @@ Der Dienst kann beim Beenden auf sichere Werte zurückstellen:
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/python -m pytest          # 58 Tests, laufen ohne Hardware
+.venv/bin/python -m pytest          # 61 Tests, laufen ohne Hardware
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_ui.py
 ```
 

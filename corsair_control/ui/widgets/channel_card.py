@@ -20,7 +20,8 @@ from corsair_control.core.engine import ChannelSnapshot
 from corsair_control.core.profile import MODE_CURVE, MODE_FIXED, MODE_MANUAL, ChannelConfig
 from corsair_control.core.sensors import Sensor
 from corsair_control.ui.i18n import tr
-from corsair_control.ui.theme import PALETTE
+from corsair_control.ui.icons import glyph_pixmap
+from corsair_control.ui.theme import PALETTE, mix
 from corsair_control.ui.widgets.curve_editor import CurveWidget
 from corsair_control.ui.widgets.gauge import Bar
 
@@ -61,6 +62,7 @@ class ChannelCard(QFrame):
         self._is_selected = False
 
         accent = PALETTE.pump if kind == "pump" else PALETTE.accent
+        self.accent = accent
         self.setMinimumWidth(300)
 
         layout = QVBoxLayout(self)
@@ -69,18 +71,25 @@ class ChannelCard(QFrame):
 
         header = QHBoxLayout()
         header.setSpacing(8)
+
+        self.icon = QLabel()
+        self.icon.setPixmap(glyph_pixmap("pump" if kind == "pump" else "fan", accent, 18))
+        self.icon.setFixedWidth(20)
+        header.addWidget(self.icon)
+
         self.title = QLabel(label)
         self.title.setObjectName("CardTitle")
         badge = QLabel(tr("Pump") if kind == "pump" else tr("Fan"))
         badge.setStyleSheet(
-            f"color:{accent}; font-size:10px; font-weight:600;"
-            f"border:1px solid {accent}; border-radius:6px; padding:1px 6px;"
+            f"color:{accent}; font-size:10px; font-weight:700; letter-spacing:0.4px;"
+            f"background:{mix(PALETTE.surface_alt, accent, 0.18).name()};"
+            f"border-radius:6px; padding:2px 7px;"
         )
         header.addWidget(self.title)
         header.addWidget(badge)
         header.addStretch(1)
         self.rpm_label = QLabel("— rpm")
-        self.rpm_label.setStyleSheet(f"color:{PALETTE.text}; font-size:15px; font-weight:600;")
+        self.rpm_label.setObjectName("Metric")
         header.addWidget(self.rpm_label)
         layout.addLayout(header)
 
@@ -174,10 +183,12 @@ class ChannelCard(QFrame):
         if selected == self._is_selected:
             return
         self._is_selected = selected
-        accent = PALETTE.pump if self.kind == "pump" else PALETTE.accent
         if selected:
             self.setStyleSheet(
-                f"#Card {{ border: 1px solid {accent}; background: {PALETTE.surface_alt}; }}"
+                f"#Card {{ border: 1px solid {self.accent};"
+                f" background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+                f" stop:0 {mix(PALETTE.surface_alt, self.accent, 0.10).name()},"
+                f" stop:1 {PALETTE.surface_alt}); }}"
             )
         else:
             self.setStyleSheet("")

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from PyQt6.QtGui import QColor, QPalette
 
 
-@dataclass(frozen=True)
+@dataclass
 class Palette:
     bg: str = "#12141a"
     surface: str = "#191c24"
@@ -37,6 +37,39 @@ class Palette:
 
 
 PALETTE = Palette()
+
+#: Accent colours offered in the settings. Corsair yellow is the default
+#: because it is what the hardware looks like out of the box.
+ACCENTS: dict[str, str] = {
+    "Amber": "#f0a500",
+    "Cyan": "#22c4d6",
+    "Violet": "#8b7cf6",
+    "Green": "#3ecf8e",
+    "Red": "#ef4d5a",
+    "Blue": "#4aa8ff",
+}
+
+
+def mix(first: str | QColor, second: str | QColor, ratio: float) -> QColor:
+    """Blend two colours; ``ratio`` 0 returns *first*, 1 returns *second*."""
+    a, b = QColor(first), QColor(second)
+    ratio = max(0.0, min(1.0, ratio))
+    return QColor(
+        int(a.red() + (b.red() - a.red()) * ratio),
+        int(a.green() + (b.green() - a.green()) * ratio),
+        int(a.blue() + (b.blue() - a.blue()) * ratio),
+    )
+
+
+def set_accent(colour: str, palette: Palette = PALETTE) -> None:
+    """Switch the accent at runtime.
+
+    The custom-painted widgets read ``PALETTE.accent`` while painting, so they
+    pick the new colour up on the next repaint; the stylesheet has to be
+    rebuilt and reapplied by the caller.
+    """
+    palette.accent = colour
+    palette.accent_dim = mix(colour, palette.bg, 0.45).name()
 
 
 def temperature_colour(temp: float | None, palette: Palette = PALETTE) -> QColor:
@@ -133,34 +166,43 @@ def stylesheet(palette: Palette = PALETTE) -> str:
        label in the window. */
 
     #Sidebar {{
-        background: {p.surface};
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 {mix(p.surface, p.accent, 0.05).name()}, stop:0.35 {p.surface});
         border-right: 1px solid {p.border};
     }}
     #SidebarTitle {{
-        font-size: 17px;
-        font-weight: 600;
-        padding: 16px 16px 4px 16px;
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
         color: {p.text};
     }}
     #SidebarSubtitle {{
         color: {p.text_faint};
-        padding: 0 16px 12px 16px;
         font-size: 11px;
+    }}
+    #NavSection {{
+        color: {p.text_faint};
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 1.2px;
+        padding: 10px 18px 2px 18px;
     }}
     #NavList {{
         background: transparent;
         border: none;
         outline: none;
-        padding: 6px 8px;
+        padding: 4px 8px;
     }}
     #NavList::item {{
-        padding: 9px 12px;
+        padding: 9px 10px;
         margin: 2px 4px;
-        border-radius: 8px;
+        border-radius: 9px;
+        border-left: 3px solid transparent;
         color: {p.text_dim};
     }}
     #NavList::item:selected {{
-        background: {p.surface_hover};
+        background: {mix(p.surface_hover, p.accent, 0.14).name()};
+        border-left: 3px solid {p.accent};
         color: {p.text};
     }}
     #NavList::item:hover {{
@@ -168,8 +210,9 @@ def stylesheet(palette: Palette = PALETTE) -> str:
     }}
 
     QLabel#SectionTitle {{
-        font-size: 15px;
-        font-weight: 600;
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
         color: {p.text};
     }}
     QLabel#Hint, QLabel#Dim {{
@@ -179,37 +222,60 @@ def stylesheet(palette: Palette = PALETTE) -> str:
         color: {p.text_faint};
         font-size: 11px;
     }}
+    QLabel#PageTitle {{
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+    }}
+    QLabel#Metric {{
+        font-size: 16px;
+        font-weight: 700;
+    }}
 
     #Card {{
-        background: {p.surface};
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 {mix(p.surface, "#ffffff", 0.03).name()}, stop:1 {p.surface});
         border: 1px solid {p.border};
-        border-radius: 12px;
+        border-radius: 14px;
     }}
     #Card:hover {{
-        border: 1px solid {p.surface_hover};
+        border: 1px solid {mix(p.border, p.accent, 0.35).name()};
     }}
     #CardTitle {{
         font-weight: 600;
         font-size: 13px;
     }}
+    #Toast {{
+        background: {mix(p.surface_alt, p.good, 0.25).name()};
+        border: 1px solid {p.good};
+        border-radius: 9px;
+        padding: 4px 10px;
+        color: {p.text};
+        font-size: 11px;
+    }}
 
     QPushButton {{
-        background: {p.surface_alt};
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 {mix(p.surface_alt, "#ffffff", 0.05).name()}, stop:1 {p.surface_alt});
         border: 1px solid {p.border};
-        border-radius: 8px;
+        border-radius: 9px;
         padding: 7px 14px;
         color: {p.text};
     }}
-    QPushButton:hover {{ background: {p.surface_hover}; }}
+    QPushButton:hover {{
+        background: {p.surface_hover};
+        border: 1px solid {mix(p.border, p.accent, 0.4).name()};
+    }}
     QPushButton:pressed {{ background: {p.border}; }}
     QPushButton:disabled {{ color: {p.text_faint}; background: {p.surface}; }}
     QPushButton#Accent {{
-        background: {p.accent};
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 {mix(p.accent, "#ffffff", 0.18).name()}, stop:1 {p.accent});
         border: 1px solid {p.accent};
         color: #1a1400;
         font-weight: 600;
     }}
-    QPushButton#Accent:hover {{ background: #ffb71a; }}
+    QPushButton#Accent:hover {{ background: {mix(p.accent, "#ffffff", 0.3).name()}; }}
     QPushButton#Danger:hover {{ background: {p.bad}; color: #14060a; }}
     QPushButton#Ghost {{
         background: transparent;
