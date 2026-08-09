@@ -20,6 +20,18 @@ def _xdg(var: str, fallback: str) -> Path:
     return Path(value) if value else Path.home() / fallback
 
 
+def is_root() -> bool:
+    """Whether the process runs as root.
+
+    ``os.geteuid`` does not exist outside POSIX, so it cannot be called
+    unguarded - on Windows that would be an AttributeError before the window
+    ever opens. Nothing there is root in this sense either, so False is both
+    safe and correct.
+    """
+    geteuid = getattr(os, "geteuid", None)
+    return geteuid() == 0 if geteuid is not None else False
+
+
 def config_dir() -> Path:
     """Directory holding settings and profiles.
 
@@ -30,7 +42,7 @@ def config_dir() -> Path:
     override = os.environ.get("CORSAIR_CONTROL_CONFIG_DIR")
     if override:
         return Path(override)
-    if os.geteuid() == 0:
+    if is_root():
         return SYSTEM_CONFIG_DIR
     return _xdg("XDG_CONFIG_HOME", ".config") / APP_SLUG
 
@@ -39,7 +51,7 @@ def state_dir() -> Path:
     override = os.environ.get("CORSAIR_CONTROL_STATE_DIR")
     if override:
         return Path(override)
-    if os.geteuid() == 0:
+    if is_root():
         return Path("/var/lib") / APP_SLUG
     return _xdg("XDG_STATE_HOME", ".local/state") / APP_SLUG
 

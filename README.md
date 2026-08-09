@@ -145,6 +145,32 @@ sudo install -m 644 packaging/60-corsair-control.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
+### Und unter Windows?
+
+Teilweise – als Spielwiese, nicht als Ersatz für iCUE.
+
+```powershell
+py -m venv .venv
+.venv\Scripts\pip install .
+.venv\Scripts\corsair-control --demo
+```
+
+| Funktion | Windows |
+| --- | --- |
+| Oberfläche, Demo-Modus, Kurven-Editor, Profile | läuft |
+| Corsair-Geräte über liquidctl | grundsätzlich möglich, viele Modelle brauchen erst einen Treiberwechsel mit [Zadig](https://zadig.akeo.ie/) |
+| Wassertemperatur der AIO als Kurvenquelle | läuft (kommt vom Gerät selbst) |
+| NVIDIA-GPU-Temperatur | läuft, wenn `nvidia-smi` im PATH liegt |
+| **CPU-Temperatur** | **nein** – die kommt aus hwmon, das gibt es nur unter Linux |
+| Mainboard-Lüfter | nein (hwmon) |
+| Hintergrunddienst, udev-Regeln | nein (systemd/udev) |
+| Automatik: Uhrzeit, Temperatur | läuft |
+| Automatik: Prozessname, Akkubetrieb | nein (liest `/proc` bzw. `/sys`) |
+
+Ohne CPU-Temperatur fällt der häufigste Anwendungsfall weg – für einen ersten
+Blick auf die Oberfläche reicht es trotzdem. Getestet ist unter Windows nichts;
+die Codepfade sind nur so abgesichert, dass nichts abstürzt.
+
 ### Warum udev-Regeln?
 
 USB-HID-Geräte gehören unter Linux standardmäßig root. Ohne Regel bekämst du
