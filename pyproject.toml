@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "corsair-control"
+version = "0.1.0"
+description = "Graphical fan, pump and lighting control for Corsair hardware on Linux"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "Corsair Control contributors" }]
+keywords = ["corsair", "fan", "pump", "aio", "watercooling", "hwmon", "liquidctl"]
+classifiers = [
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Hardware",
+]
+
+dependencies = [
+    "liquidctl>=1.13.0",
+    "PyQt6>=6.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-qt>=4"]
+
+[project.scripts]
+corsair-control = "corsair_control.app:main"
+corsair-controld = "corsair_control.daemon:main"
+
+[tool.setuptools.packages.find]
+include = ["corsair_control*"]
+
+[tool.setuptools.package-data]
+corsair_control = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

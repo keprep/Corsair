@@ -1,0 +1,22 @@
+# Corsair Control - grant the logged-in desktop user access to Corsair
+# cooling hardware so the application does not have to run as root.
+#
+# Install:
+#   sudo cp 60-corsair-control.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+# Then unplug/replug the device or reboot.
+#
+# TAG+="uaccess" hands access to whoever is logged in on the local seat, which
+# is what you want on a single-user desktop. Replace it with GROUP="plugdev"
+# if your distribution prefers group-based access.
+
+# Corsair (vendor 1b1c) - raw USB access
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1b1c", MODE="0660", TAG+="uaccess"
+
+# Corsair - HID interface used by Commander/Hydro/Elite devices
+KERNEL=="hidraw*", ATTRS{idVendor}=="1b1c", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", MODE="0660", TAG+="uaccess"
+
+# Corsair AXi / HXi power supplies speak over a serial bridge
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1c00", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1c01", MODE="0660", TAG+="uaccess"

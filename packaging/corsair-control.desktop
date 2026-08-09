@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Corsair Control
+GenericName=Fan and pump control
+Comment=Control Corsair fans, AIO pumps and lighting on Linux
+Exec=corsair-control
+Icon=corsair-control
+Terminal=false
+Categories=System;Monitor;HardwareSettings;Settings;
+Keywords=fan;pump;cooling;corsair;aio;rgb;temperature;
+StartupNotify=true

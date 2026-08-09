@@ -1,0 +1,27 @@
+[Unit]
+Description=Corsair Control fan and pump daemon
+Documentation=https://github.com/keprep/Corsair
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/corsair-controld --verbose
+Restart=on-failure
+RestartSec=5
+
+# The daemon reads its profiles from /etc/corsair-control when it runs as root.
+Environment=PYTHONUNBUFFERED=1
+
+# Hardening: the daemon only needs USB/HID and its own configuration.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/etc/corsair-control /var/lib/corsair-control
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target
