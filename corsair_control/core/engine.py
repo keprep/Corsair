@@ -173,7 +173,11 @@ class ControlEngine:
             def reader(device: ManagedDevice = device, name: str = name) -> float | None:
                 return device.last_status.temperatures.get(name)
 
-            category = "liquid" if "liquid" in name.lower() else "other"
+            lowered = name.lower()
+            # Hydro Platinum says "Liquid temperature", Commander Core says
+            # "Water temperature" - both are the loop.
+            liquid = "liquid" in lowered or "water" in lowered
+            category = "liquid" if liquid else "other"
             sensors.append(
                 Sensor(
                     sensor_id=sensor_id,
@@ -187,7 +191,8 @@ class ControlEngine:
 
     def _preferred_sensor_for(self, device: ManagedDevice) -> str | None:
         for name in device.last_status.temperatures:
-            if "liquid" in name.lower():
+            lowered = name.lower()
+            if "liquid" in lowered or "water" in lowered:
                 return f"dev:{device.key}:{name}"
         return None
 

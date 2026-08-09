@@ -15,6 +15,7 @@ import logging
 import math
 import random
 import re
+import textwrap
 import threading
 import time
 from dataclasses import dataclass, field
@@ -22,8 +23,11 @@ from typing import Any, Iterable, Sequence
 
 log = logging.getLogger(__name__)
 
-SPEED_KEY_RE = re.compile(r"^\s*(fan|pump)\s*(\d*)\s*speed\s*$", re.IGNORECASE)
-DUTY_KEY_RE = re.compile(r"^\s*(fan|pump)\s*(\d*)\s*duty\s*$", re.IGNORECASE)
+# Drivers put the index on either side of the noun: Hydro Platinum reports
+# "Fan 1 speed", Commander Core reports "Fan speed 1". Missing the second form
+# made every fan on a Commander Core invisible, so both are matched here.
+SPEED_KEY_RE = re.compile(r"^\s*(fan|pump)\s*(\d*)\s*speed\s*(\d*)\s*$", re.IGNORECASE)
+DUTY_KEY_RE = re.compile(r"^\s*(fan|pump)\s*(\d*)\s*duty\s*(\d*)\s*$", re.IGNORECASE)
 TEMP_KEY_RE = re.compile(r"temperature|temp\b", re.IGNORECASE)
 
 #: Never drive a pump below this unless the user explicitly lowers the floor.
@@ -90,9 +94,42 @@ class DeviceStatus:
         return self.error is None
 
 
-def _normalise_channel(prefix: str, index: str) -> str:
+def _normalise_channel(prefix: str, before: str, after: str) -> str:
     prefix = prefix.lower()
+    index = before or after
     return f"{prefix}{index}" if index else prefix
+
+
+def _always_raises_unsupported(method: Any) -> bool:
+    """Whether a driver method exists only to reject the call.
+
+    liquidctl gives every driver the full method surface and has the ones a
+    device cannot do raise ``NotSupportedByDriver``/``NotSupportedByDevice``.
+    A plain ``hasattr`` therefore says "this cooler has an LCD" about hardware
+    that has none. Reading the body is a heuristic, but a cheap one, and it
+    fails safe: an unreadable source is treated as supported.
+    """
+    try:
+        source = textwrap.dedent(inspect.getsource(method))
+    except (OSError, TypeError):  # C extension, or source not on disk
+        return False
+
+    statements: list[str] = []
+    in_docstring = False
+    for raw in source.splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("def ", "@", "#")):
+            continue
+        if in_docstring:
+            if line.endswith(('"""', "'''")):
+                in_docstring = False
+            continue
+        if line.startswith(('"""', "'''")):
+            if not (len(line) > 3 and line.endswith(('"""', "'''"))):
+                in_docstring = True
+            continue
+        statements.append(line)
+    return len(statements) == 1 and statements[0].startswith("raise NotSupported")
 
 
 def _title(channel_id: str) -> str:
@@ -328,9 +365,10 @@ class ManagedDevice:
             if isinstance(value, (list, tuple, set)):
                 names = [str(v) for v in value]
                 break
+        setter = getattr(self._dev, "set_color", None)
+        if setter is None or _always_raises_unsupported(setter):
+            return []
         if not names:
-            if not hasattr(self._dev, "set_color"):
-                return []
             names = ["led"]
 
         speed = direction = False
@@ -354,7 +392,8 @@ class ManagedDevice:
 
     def _discover_screens(self) -> list[ScreenChannel]:
         """LCD panels. Only a few drivers have them, so probe carefully."""
-        if not hasattr(self._dev, "set_screen"):
+        setter = getattr(self._dev, "set_screen", None)
+        if setter is None or _always_raises_unsupported(setter):
             return []
         names: list[str] = []
         declared = False

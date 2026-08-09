@@ -19,9 +19,46 @@ class DiscoveryResult:
         self.devices: list[ManagedDevice] = []
         self.errors: list[str] = []
         self.skipped: list[str] = []
+        #: Corsair hardware present on the bus that no driver claimed, as
+        #: (vendor_id, product_id, product_name) - see :func:`unclaimed_corsair`.
+        self.unclaimed: list[tuple[int, int, str]] = []
 
     def __bool__(self) -> bool:
         return bool(self.devices)
+
+
+def unclaimed_corsair(claimed: Iterable[ManagedDevice]) -> list[tuple[int, int, str]]:
+    """Corsair USB devices that liquidctl has no driver for.
+
+    Newer revisions ship new product IDs - the iCUE ELITE CAPELLIX XT is the
+    current example - and liquidctl simply does not see them. Saying "there is
+    a Corsair device here that no driver claims, its ID is 1b1c:xxxx" turns a
+    silent absence into something the user can act on and report upstream.
+    """
+    try:
+        import hid
+    except ImportError:  # pragma: no cover - hidapi ships with liquidctl
+        return []
+
+    taken = set()
+    for device in claimed:
+        product = getattr(device, "_dev", None)
+        pid = getattr(product, "product_id", None)
+        if pid is not None:
+            taken.add(int(pid))
+
+    found: dict[int, str] = {}
+    try:
+        for entry in hid.enumerate(CORSAIR_VENDOR_ID, 0):
+            pid = int(entry.get("product_id", 0))
+            if pid in taken or pid in found:
+                continue
+            found[pid] = str(entry.get("product_string") or "").strip() or "unknown model"
+    except Exception as exc:  # pragma: no cover - depends on permissions
+        log.debug("Cannot enumerate HID devices: %s", exc)
+        return []
+
+    return [(CORSAIR_VENDOR_ID, pid, name) for pid, name in sorted(found.items())]
 
 
 def _iter_backends() -> Iterable[object]:
@@ -108,6 +145,14 @@ def discover(
 
     if not result.devices and not result.errors:
         result.errors.append("Devices were found, but none of them exposes a fan or pump channel.")
+
+    result.unclaimed = unclaimed_corsair(result.devices)
+    for vendor, product, name in result.unclaimed:
+        result.errors.append(
+            f"Corsair device {vendor:04x}:{product:04x} ({name}) is connected but no "
+            "liquidctl driver claims it - this model is not supported yet. Reporting "
+            "the ID at github.com/liquidctl/liquidctl helps."
+        )
 
     return result
 

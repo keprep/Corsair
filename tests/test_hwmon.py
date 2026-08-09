@@ -112,3 +112,39 @@ def test_discovery_ignores_chips_without_pwm(tmp_path, monkeypatch):
 def test_missing_sysfs_is_not_an_error(tmp_path, monkeypatch):
     monkeypatch.setattr(hwmon, "HWMON_ROOT", tmp_path / "nope")
     assert discover_hwmon_backends() == []
+
+
+def test_unclaimed_corsair_reports_ids(monkeypatch):
+    """A device no driver claims must be named, not silently absent."""
+    from corsair_control.core import manager
+
+    fake_entries = [
+        {"product_id": 0x0C1C, "product_string": "Commander CORE"},
+        {"product_id": 0x0C40, "product_string": "H150i ELITE CAPELLIX XT"},
+    ]
+
+    class FakeHid:
+        @staticmethod
+        def enumerate(vendor, product):
+            return fake_entries
+
+    monkeypatch.setitem(__import__("sys").modules, "hid", FakeHid)
+
+    class Claimed:
+        def __init__(self, pid):
+            self._dev = type("B", (), {"product_id": pid})()
+
+    unclaimed = manager.unclaimed_corsair([Claimed(0x0C1C)])
+    assert unclaimed == [(0x1B1C, 0x0C40, "H150i ELITE CAPELLIX XT")]
+
+
+def test_unclaimed_corsair_survives_a_broken_hid_backend(monkeypatch):
+    from corsair_control.core import manager
+
+    class BoomHid:
+        @staticmethod
+        def enumerate(vendor, product):
+            raise OSError("no permission")
+
+    monkeypatch.setitem(__import__("sys").modules, "hid", BoomHid)
+    assert manager.unclaimed_corsair([]) == []
