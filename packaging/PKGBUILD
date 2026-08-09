@@ -30,6 +30,9 @@ source=()
 _root="${startdir}/.."
 
 prepare() {
+    # Only what the wheel build needs. Notably not packaging/ itself: makepkg
+    # puts $srcdir inside it, and copying a directory into its own subtree
+    # fails. The data files below are installed straight from $_root instead.
     rm -rf "${srcdir}/${pkgname}"
     mkdir -p "${srcdir}/${pkgname}"
     cp -a \
@@ -37,7 +40,6 @@ prepare() {
         "${_root}/README.md" \
         "${_root}/LICENSE" \
         "${_root}/corsair_control" \
-        "${_root}/packaging" \
         "${srcdir}/${pkgname}/"
 }
 
@@ -60,17 +62,17 @@ package() {
     cd "${srcdir}/${pkgname}"
     python -m installer --destdir="${pkgdir}" dist/*.whl
 
-    install -Dm644 packaging/60-corsair-control.rules \
+    install -Dm644 "${_root}/packaging/60-corsair-control.rules" \
         "${pkgdir}/usr/lib/udev/rules.d/60-corsair-control.rules"
-    install -Dm644 packaging/corsair-control.desktop \
+    install -Dm644 "${_root}/packaging/corsair-control.desktop" \
         "${pkgdir}/usr/share/applications/corsair-control.desktop"
-    install -Dm644 packaging/corsair-control.svg \
+    install -Dm644 "${_root}/packaging/corsair-control.svg" \
         "${pkgdir}/usr/share/icons/hicolor/scalable/apps/corsair-control.svg"
     install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 
     # The shipped unit points at /usr/local/bin for the install.sh route;
     # a packaged build lands in /usr/bin.
-    install -Dm644 packaging/corsair-controld.service \
+    install -Dm644 "${_root}/packaging/corsair-controld.service" \
         "${pkgdir}/usr/lib/systemd/system/corsair-controld.service"
     sed -i 's|/usr/local/bin/corsair-controld|/usr/bin/corsair-controld|' \
         "${pkgdir}/usr/lib/systemd/system/corsair-controld.service"
