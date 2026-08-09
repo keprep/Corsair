@@ -39,6 +39,7 @@ from corsair_control.core.config import Settings
 from corsair_control.core.engine import ControlEngine, Snapshot
 from corsair_control.core.profile import ProfileStore
 from corsair_control.core.recorder import export_history
+from corsair_control.ui.dialogs.binding import BindingDialog
 from corsair_control.ui.dialogs.calibration import CalibrationDialog
 from corsair_control.ui.i18n import tr
 from corsair_control.ui.icons import app_icon, fan_pixmap, glyph_icon, tray_icon
@@ -155,6 +156,7 @@ class MainWindow(QMainWindow):
         self.settings_page.settingsChanged.connect(self._on_settings_changed)
         self.settings_page.accentChanged.connect(self._on_accent_changed)
         self.settings_page.rescanRequested.connect(self.rescan)
+        self.settings_page.bindingRequested.connect(self._bind_device)
         self.settings_page.alarmsChanged.connect(self._on_alarms_changed)
         self.settings_page.exportRequested.connect(self._export_history)
 
@@ -578,6 +580,13 @@ class MainWindow(QMainWindow):
                 card.sync_from_config()
             self._toast(tr("Calibration stored"))
         self._schedule_save()
+
+    def _bind_device(self) -> None:
+        dialog = BindingDialog(self.engine.unclaimed, self.settings, self)
+        if dialog.exec() and dialog.saved:
+            # The binding only takes effect on a fresh discovery.
+            self.rescan()
+            self._toast(tr("Saved"))
 
     def _on_automation_changed(self) -> None:
         self.store.automation_enabled = self.automation_page.enabled.isChecked()

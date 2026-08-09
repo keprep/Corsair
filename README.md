@@ -145,6 +145,38 @@ sudo install -m 644 packaging/60-corsair-control.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
+### Wenn ein Gerät nicht erkannt wird
+
+Corsair bringt Neuauflagen gelegentlich unter einer neuen USB-Kennung heraus,
+ohne das Protokoll zu ändern. liquidctl erkennt sie dann nicht – aktuelles
+Beispiel ist die **iCUE ELITE CAPELLIX XT**, deren Support-Anfrage
+([liquidctl #639](https://github.com/liquidctl/liquidctl/issues/639)) als
+*„closed as not planned"* geschlossen wurde.
+
+Die App meldet solche Geräte aktiv mit ihrer Kennung, statt sie zu verschweigen,
+und erlaubt es, sie von Hand einem Treiber zuzuordnen:
+
+```bash
+corsair-control --list                                  # zeigt "unclaimed"-Geräte
+corsair-control --protocols                             # welche Protokolle gibt es?
+corsair-control --try-bind 1b1c:0c40=commander-core-aio  # testen, nichts speichern
+corsair-control --bind 1b1c:0c40=commander-core-aio      # dauerhaft übernehmen
+corsair-control --unbind 1b1c:0c40                       # wieder entfernen
+```
+
+In der Oberfläche liegt dasselbe unter *Einstellungen → Nicht unterstützte
+Geräte …*.
+
+`--try-bind` verbindet sich, initialisiert und liest den Status – und zeigt dir,
+was zurückkam. Antwortet das Gerät weder mit einer Drehzahl noch mit einer
+Temperatur, wird die Zuordnung abgelehnt und **nichts weiter geschrieben**. Das
+ist die Sperre, die verhindert, dass Lüfterpakete auf einer Corsair-Tastatur
+landen – die Hersteller-Kennung `1b1c` deckt auch Eingabegeräte ab.
+
+> **Ehrlich bleibt:** Das ist ein Versuch, keine Unterstützung. Entweder das
+> Gerät spricht das Protokoll – dann funktioniert es – oder es ignoriert uns.
+> Der Test schreibt dabei auf das Gerät. Richte ihn nur auf Kühlungshardware.
+
 ### Und unter Windows?
 
 Teilweise – als Spielwiese, nicht als Ersatz für iCUE.
@@ -345,7 +377,7 @@ Der Dienst kann beim Beenden auf sichere Werte zurückstellen:
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/python -m pytest          # 132 Tests, laufen ohne Hardware
+.venv/bin/python -m pytest          # 176 Tests, laufen ohne Hardware
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_ui.py
 ```
 
@@ -362,6 +394,7 @@ corsair_control/
 │   ├── automation.py   Regeln für automatische Profilwahl
 │   ├── alarms.py    Pumpe/Lüfter/Temperatur überwachen
 │   ├── recorder.py  CSV-Aufzeichnung und Export
+│   ├── experimental.py  Treiber-Zwangsbindung für unbekannte Geräte
 │   ├── engine.py    Regelschleife, erzeugt Snapshots für die UI
 │   └── profile.py   Profile und deren Persistenz
 ├── ui/            # PyQt6: Fenster, Seiten, selbstgezeichnete Widgets

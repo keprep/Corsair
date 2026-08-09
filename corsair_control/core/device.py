@@ -143,12 +143,14 @@ def _title(channel_id: str) -> str:
 class ManagedDevice:
     """Thread-safe wrapper around a single liquidctl device."""
 
-    def __init__(self, backend: Any, *, demo: bool = False) -> None:
+    def __init__(self, backend: Any, *, demo: bool = False, experimental: bool = False) -> None:
         self._dev = backend
         self._lock = threading.RLock()
         self._connected = False
         self._initialised = False
         self.demo = demo
+        #: Bound by hand to a driver that does not list this USB ID.
+        self.experimental = experimental
         self.channels: list[Channel] = []
         self.lighting_channels: list[LightingChannel] = []
         self.screen_channels: list[ScreenChannel] = []

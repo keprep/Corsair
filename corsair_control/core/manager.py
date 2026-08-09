@@ -6,6 +6,7 @@ import logging
 from typing import Iterable
 
 from corsair_control.core.device import DeviceError, ManagedDevice, demo_devices
+from corsair_control.core.experimental import parse_bindings, probe
 from corsair_control.core.hwmon import discover_hwmon_backends
 
 log = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ def discover(
     corsair_only: bool = True,
     initialize: bool = True,
     include_hwmon: bool = True,
+    bindings: Iterable[str] | None = None,
 ) -> DiscoveryResult:
     """Find supported devices and bring them up.
 
@@ -146,15 +148,58 @@ def discover(
     if not result.devices and not result.errors:
         result.errors.append("Devices were found, but none of them exposes a fan or pump channel.")
 
+    result.devices.extend(_apply_bindings(bindings, result))
     result.unclaimed = unclaimed_corsair(result.devices)
     for vendor, product, name in result.unclaimed:
         result.errors.append(
             f"Corsair device {vendor:04x}:{product:04x} ({name}) is connected but no "
-            "liquidctl driver claims it - this model is not supported yet. Reporting "
+            "liquidctl driver claims it - this model is not supported yet. It can be "
+            "bound to a driver by hand (Settings > unsupported devices), and reporting "
             "the ID at github.com/liquidctl/liquidctl helps."
         )
 
     return result
+
+
+def _apply_bindings(bindings: Iterable[str] | None, result: DiscoveryResult) -> list[ManagedDevice]:
+    """Bring up devices the user bound to a driver by hand."""
+    if not bindings:
+        return []
+
+    parsed, errors = parse_bindings(bindings)
+    result.errors.extend(errors)
+
+    claimed = {getattr(getattr(d, "_dev", None), "product_id", None) for d in result.devices}
+    devices: list[ManagedDevice] = []
+
+    for binding in parsed:
+        if binding.product_id in claimed:
+            log.info("%s is already handled by a real driver, skipping the binding", binding)
+            continue
+
+        backend, outcome = probe(binding)
+        if backend is None:
+            result.errors.append(f"Forced binding {binding} did not work: {outcome.describe()}")
+            continue
+
+        device = ManagedDevice(backend, experimental=True)
+        try:
+            device.probe()
+        except DeviceError as exc:
+            result.errors.append(f"Forced binding {binding} failed while probing: {exc}")
+            device.disconnect()
+            continue
+
+        if not device.channels:
+            result.errors.append(
+                f"Forced binding {binding} answered, but exposes no fan or pump channel."
+            )
+            device.disconnect()
+            continue
+
+        log.warning("Using %s through a forced binding - this is experimental", binding)
+        devices.append(device)
+    return devices
 
 
 def _discover_hwmon(result: DiscoveryResult) -> list[ManagedDevice]:

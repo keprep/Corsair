@@ -92,6 +92,9 @@ class Settings:
     #: Continuously append measurements to a daily CSV in the state directory.
     record_history: bool = False
     history_retention_days: int = 14
+    #: Manual driver bindings for devices liquidctl does not recognise,
+    #: as "vid:pid=protocol" - see core/experimental.py.
+    experimental_bindings: list = field(default_factory=list)
     extra: dict = field(default_factory=dict)
 
     @classmethod

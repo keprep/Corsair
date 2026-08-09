@@ -61,6 +61,33 @@ GERMAN: dict[str, str] = {
         "Die Kurve wird einmal auf den Controller geschrieben und läuft dort "
         "weiter, auch wenn dieses Programm nicht läuft.",
     "Applied": "Angewendet",
+    # forced driver bindings
+    "Unsupported devices": "Nicht unterstützte Geräte",
+    "Unsupported devices…": "Nicht unterstützte Geräte …",
+    "Bind a device by hand": "Gerät von Hand zuordnen",
+    "Bind a device liquidctl does not recognise to a driver by hand.":
+        "Ein von liquidctl nicht erkanntes Gerät von Hand einem Treiber zuordnen.",
+    "Corsair sometimes ships a new revision under a new USB ID, and "
+    "liquidctl then does not recognise it even though the protocol is "
+    "unchanged. Here you can tell the application to treat such a device "
+    "as a model it does know.":
+        "Corsair bringt Neuauflagen manchmal unter einer neuen USB-Kennung heraus; "
+        "liquidctl erkennt sie dann nicht, obwohl das Protokoll unverändert ist. "
+        "Hier kannst du festlegen, dass ein solches Gerät wie ein bekanntes Modell "
+        "behandelt wird.",
+    "Testing writes to the device. Only do this for cooling hardware - "
+    "never point it at a keyboard, mouse or headset.":
+        "Der Test schreibt auf das Gerät. Nur bei Kühlungshardware anwenden – "
+        "niemals bei Tastatur, Maus oder Headset.",
+    "Device": "Gerät",
+    "Treat as": "Behandeln als",
+    "Matches": "Passt zu",
+    "Test": "Testen",
+    "Testing…": "Wird getestet …",
+    "The device answered": "Das Gerät hat geantwortet",
+    "Keep binding": "Zuordnung behalten",
+    "Every connected Corsair device already has a driver.":
+        "Für jedes angeschlossene Corsair-Gerät gibt es bereits einen Treiber.",
     # multi-sensor selection
     "Pick a sensor": "Sensor wählen",
     "Hottest": "Wärmster",

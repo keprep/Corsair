@@ -187,3 +187,4 @@ class _Result:
         self.devices = devices
         self.errors: list[str] = []
         self.skipped: list[str] = []
+        self.unclaimed: list[tuple[int, int, str]] = []

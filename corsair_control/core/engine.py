@@ -102,6 +102,8 @@ class ControlEngine:
         )
         self.devices: list[ManagedDevice] = []
         self.startup_errors: list[str] = []
+        #: Corsair hardware on the bus that no driver claimed.
+        self.unclaimed: list[tuple[int, int, str]] = []
 
         self.alarms = AlarmMonitor(settings=store.alarms)
         self.automation = AutomationEngine(
@@ -138,9 +140,14 @@ class ControlEngine:
             self.sensors.unregister_prefix("dev:")
 
             self.sensors.discover(demo=self.demo)
-            result = discover(demo=self.demo, include_hwmon=self.settings.control_mainboard_fans)
+            result = discover(
+                demo=self.demo,
+                include_hwmon=self.settings.control_mainboard_fans,
+                bindings=self.settings.experimental_bindings,
+            )
             self.devices = result.devices
             self.startup_errors = list(result.errors)
+            self.unclaimed = list(result.unclaimed)
 
             for device in self.devices:
                 self._register_device_sensors(device)

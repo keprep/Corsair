@@ -41,6 +41,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--minimised", action="store_true", help="start hidden in the system tray"
     )
+    parser.add_argument(
+        "--protocols",
+        action="store_true",
+        help="list the protocols an unrecognised device can be bound to",
+    )
+    parser.add_argument(
+        "--try-bind",
+        metavar="ID=PROTOCOL",
+        help=(
+            "test-drive a forced binding, e.g. 1b1c:0c40=commander-core-aio, "
+            "and print what the device answered without saving anything"
+        ),
+    )
+    parser.add_argument(
+        "--bind",
+        metavar="ID=PROTOCOL",
+        help="save a forced binding so the device is used from now on",
+    )
+    parser.add_argument(
+        "--unbind", metavar="ID", help="remove a saved binding, e.g. 1b1c:0c40"
+    )
     parser.add_argument("--lang", choices=("system", "de", "en"), help="interface language")
     parser.add_argument("-v", "--verbose", action="count", default=0, help="more logging")
     return parser
@@ -108,12 +129,104 @@ def print_inventory(engine: ControlEngine) -> int:
     return 0
 
 
+def print_protocols() -> int:
+    from corsair_control.core.experimental import PROTOCOLS
+
+    print("Protocols an unrecognised device can be forced onto:\n")
+    for protocol in PROTOCOLS.values():
+        print(f"  {protocol.key:<22} {protocol.label}")
+        if protocol.note:
+            print(f"  {'':<22} matches: {protocol.note}")
+    print(
+        "\nUse it like:  corsair-control --try-bind 1b1c:0c40=commander-core-aio"
+        "\nThis writes to the device. Only point it at cooling hardware."
+    )
+    return 0
+
+
+def try_binding(spec: str) -> int:
+    from corsair_control.core.experimental import Binding, probe
+
+    try:
+        binding = Binding.parse(spec)
+    except ValueError as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 2
+
+    print(f"Trying {binding} …")
+    backend, outcome = probe(binding)
+    if backend is None:
+        print(f"  no: {outcome.describe()}")
+        print(
+            "\nEither the device speaks a different protocol, or it is not cooling "
+            "hardware at all. Try another protocol from --protocols."
+        )
+        return 1
+
+    print(f"  yes: {outcome.describe()}\n")
+    for entry in outcome.status:
+        key, value = entry[0], entry[1]
+        unit = entry[2] if len(entry) > 2 else ""
+        print(f"    {key:<28} {value} {unit}".rstrip())
+    try:
+        backend.disconnect()
+    except Exception:  # pragma: no cover - best effort
+        pass
+
+    print(
+        f"\nLooks usable. Keep it with:  corsair-control --bind {binding}"
+        "\nCheck the readings above against what the hardware is really doing "
+        "before you let it control anything."
+    )
+    return 0
+
+
+def save_binding(settings: Settings, spec: str) -> int:
+    from corsair_control.core.experimental import Binding
+
+    try:
+        binding = Binding.parse(spec)
+    except ValueError as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 2
+
+    kept = [b for b in settings.experimental_bindings if not str(b).startswith(binding.usb_id)]
+    kept.append(str(binding))
+    settings.experimental_bindings = kept
+    settings.save()
+    print(f"Saved: {binding}")
+    print("It is used on the next start. Remove it again with --unbind.")
+    return 0
+
+
+def remove_binding(settings: Settings, usb_id: str) -> int:
+    prefix = usb_id.strip().lower()
+    remaining = [b for b in settings.experimental_bindings if not str(b).lower().startswith(prefix)]
+    if len(remaining) == len(settings.experimental_bindings):
+        print(f"No saved binding starts with '{usb_id}'.", file=sys.stderr)
+        return 1
+    settings.experimental_bindings = remaining
+    settings.save()
+    print(f"Removed the binding for {usb_id}.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     configure_logging(args.verbose)
     ensure_dirs()
 
+    if args.protocols:
+        return print_protocols()
+    if args.try_bind:
+        return try_binding(args.try_bind)
+
     settings = Settings.load()
+    if args.bind:
+        return save_binding(settings, args.bind)
+    if args.unbind:
+        return remove_binding(settings, args.unbind)
+
     store: ProfileStore = default_store()
     if args.profile:
         store.activate(args.profile)

@@ -82,6 +82,7 @@ class SettingsPage(QWidget):
     settingsChanged = pyqtSignal()
     accentChanged = pyqtSignal(str)
     rescanRequested = pyqtSignal()
+    bindingRequested = pyqtSignal()
     alarmsChanged = pyqtSignal()
     exportRequested = pyqtSignal()
 
@@ -242,6 +243,13 @@ class SettingsPage(QWidget):
         rescan = QPushButton(tr("Rescan devices"))
         rescan.clicked.connect(self.rescanRequested)
         tools_form.addRow(rescan)
+
+        binding = QPushButton(tr("Unsupported devices…"))
+        binding.setToolTip(
+            tr("Bind a device liquidctl does not recognise to a driver by hand.")
+        )
+        binding.clicked.connect(self.bindingRequested)
+        tools_form.addRow(binding)
         path = QLabel(str(config_dir()))
         path.setObjectName("Faint")
         path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
