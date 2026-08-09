@@ -100,7 +100,25 @@ Kanäle, die der Treiber nur lesen kann, werden in der Oberfläche als
 
 ## Installation
 
-### Schnellweg
+### Arch, CachyOS, Manjaro (empfohlen auf diesen Systemen)
+
+```bash
+sudo pacman -S --needed git base-devel python-pyqt6 liquidctl \
+                        python-build python-installer python-wheel
+git clone -b claude/corsair-fan-control-linux-xa53qx \
+          https://github.com/keprep/Corsair.git
+cd Corsair/packaging
+makepkg -si
+```
+
+Das baut ein richtiges Paket, das `pacman` kennt und mit
+`sudo pacman -R corsair-control` wieder sauber entfernt. PyQt6 und liquidctl
+kommen aus den Distributionspaketen und bleiben so mit dem System aktuell.
+
+Danach **das Gerät einmal ab- und wieder anstecken** (oder neu starten), damit
+die udev-Regeln greifen.
+
+### Andere Distributionen
 
 ```bash
 git clone https://github.com/keprep/Corsair.git
@@ -113,6 +131,10 @@ Das Skript legt eine virtuelle Umgebung an, installiert das Programm samt
 Abhängigkeiten, hinterlegt Desktop-Eintrag und Icon und installiert die
 udev-Regeln. `./install.sh --uninstall` entfernt alles wieder; deine Profile
 bleiben erhalten.
+
+> Auf Arch-Systemen funktioniert `install.sh` ebenfalls, lädt PyQt6 aber als
+> ~100-MB-Wheel von PyPI in eine eigene venv. Der PKGBUILD oben ist dort die
+> bessere Wahl.
 
 ### Von Hand
 
@@ -231,6 +253,27 @@ das innerhalb weniger Sekunden ohne Neustart.
 
 Beides ist lesbares JSON und darf von Hand bearbeitet werden. Über die
 Umgebungsvariable `CORSAIR_CONTROL_CONFIG_DIR` lässt sich ein anderer Ort wählen.
+
+---
+
+## Erste Schritte zum Testen
+
+In dieser Reihenfolge, damit klar wird, wo es hakt, falls etwas hakt:
+
+```bash
+corsair-control --demo     # Oberfläche mit simulierter Hardware
+corsair-control --list     # was wird an echter Hardware gefunden?
+corsair-control --dry-run  # echte Geräte lesen, aber nichts schreiben
+corsair-control            # scharf
+```
+
+Wenn du das Ergebnis zurückmeldest, sind diese drei Ausgaben am nützlichsten:
+
+```bash
+corsair-control --list
+lsusb | grep -i 1b1c
+corsair-control -vv 2>&1 | head -40
+```
 
 ---
 

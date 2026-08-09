@@ -1,0 +1,77 @@
+# Arch / CachyOS / Manjaro package, built from this checkout.
+#
+#   cd packaging && makepkg -si
+#
+# It deliberately builds from $startdir instead of downloading a source
+# tarball, so you get exactly the code you have in front of you. That makes it
+# unsuitable for the AUR, and perfect for handing the repository to someone
+# who wants to test it.
+#
+# Dependencies come from the distribution instead of PyPI, so PyQt6 and
+# liquidctl stay in sync with the rest of the system.
+
+pkgname=corsair-control
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Graphical fan, pump and lighting control for Corsair hardware on Linux"
+arch=('any')
+url="https://github.com/keprep/Corsair"
+license=('GPL-3.0-or-later')
+depends=('python' 'python-pyqt6' 'liquidctl')
+makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+optdepends=(
+    'qt6-wayland: native Wayland session instead of XWayland'
+    'lm_sensors: detects additional mainboard temperature sensors'
+)
+options=('!debug')
+install="${pkgname}.install"
+source=()
+
+_root="${startdir}/.."
+
+prepare() {
+    rm -rf "${srcdir}/${pkgname}"
+    mkdir -p "${srcdir}/${pkgname}"
+    cp -a \
+        "${_root}/pyproject.toml" \
+        "${_root}/README.md" \
+        "${_root}/LICENSE" \
+        "${_root}/corsair_control" \
+        "${_root}/packaging" \
+        "${srcdir}/${pkgname}/"
+}
+
+build() {
+    cd "${srcdir}/${pkgname}"
+    python -m build --wheel --no-isolation
+}
+
+check() {
+    cd "${srcdir}/${pkgname}"
+    # Only run the test suite when pytest is around; it is not a hard
+    # dependency of the package.
+    if python -c 'import pytest' 2>/dev/null && [[ -d "${_root}/tests" ]]; then
+        cp -a "${_root}/tests" .
+        QT_QPA_PLATFORM=offscreen PYTHONPATH="${PWD}" python -m pytest -q tests
+    fi
+}
+
+package() {
+    cd "${srcdir}/${pkgname}"
+    python -m installer --destdir="${pkgdir}" dist/*.whl
+
+    install -Dm644 packaging/60-corsair-control.rules \
+        "${pkgdir}/usr/lib/udev/rules.d/60-corsair-control.rules"
+    install -Dm644 packaging/corsair-control.desktop \
+        "${pkgdir}/usr/share/applications/corsair-control.desktop"
+    install -Dm644 packaging/corsair-control.svg \
+        "${pkgdir}/usr/share/icons/hicolor/scalable/apps/corsair-control.svg"
+    install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+
+    # The shipped unit points at /usr/local/bin for the install.sh route;
+    # a packaged build lands in /usr/bin.
+    install -Dm644 packaging/corsair-controld.service \
+        "${pkgdir}/usr/lib/systemd/system/corsair-controld.service"
+    sed -i 's|/usr/local/bin/corsair-controld|/usr/bin/corsair-controld|' \
+        "${pkgdir}/usr/lib/systemd/system/corsair-controld.service"
+}

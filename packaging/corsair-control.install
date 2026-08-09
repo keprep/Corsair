@@ -1,0 +1,37 @@
+post_install() {
+    cat <<'EOF'
+
+Corsair Control installed.
+
+  1. Unplug and replug the device once (or reboot) so the new udev rules
+     take effect - without that you will get "permission denied".
+  2. Try it:      corsair-control --demo
+  3. Your hardware: corsair-control --list
+  4. Start it:    corsair-control
+
+Mainboard fan headers (hwmon) can only be written as root. If you want those
+controlled too, enable the background service:
+
+  sudo systemctl enable --now corsair-controld
+
+EOF
+}
+
+post_upgrade() {
+    cat <<'EOF'
+
+Corsair Control upgraded. If the service is running, restart it:
+
+  sudo systemctl restart corsair-controld
+
+EOF
+}
+
+post_remove() {
+    cat <<'EOF'
+
+Your profiles were kept in ~/.config/corsair-control (and /etc/corsair-control
+when the service was used). Delete them by hand if you no longer need them.
+
+EOF
+}
