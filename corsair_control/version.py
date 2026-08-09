@@ -2,6 +2,6 @@
 
 __version__ = "0.1.0"
 
-APP_ID = "io.github.keprep.CorsairControl"
+APP_ID = "io.github.repkep.CorsairControl"
 APP_NAME = "Corsair Control"
 APP_SLUG = "corsair-control"

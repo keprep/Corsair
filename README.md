@@ -106,7 +106,7 @@ Kanäle, die der Treiber nur lesen kann, werden in der Oberfläche als
 sudo pacman -S --needed git base-devel python-pyqt6 liquidctl \
                         python-build python-installer python-wheel
 git clone -b claude/corsair-fan-control-linux-xa53qx \
-          https://github.com/keprep/Corsair.git
+          https://github.com/repkep/Corsair.git
 cd Corsair/packaging
 makepkg -si
 ```
@@ -121,7 +121,7 @@ Geräte angewendet – Abstecken oder Neustart ist normalerweise nicht nötig.
 ### Andere Distributionen
 
 ```bash
-git clone https://github.com/keprep/Corsair.git
+git clone https://github.com/repkep/Corsair.git
 cd Corsair
 ./install.sh              # nur für den aktuellen Benutzer
 ./install.sh --daemon     # zusätzlich den Hintergrunddienst einrichten

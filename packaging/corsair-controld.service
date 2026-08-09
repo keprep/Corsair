@@ -1,6 +1,6 @@
 [Unit]
 Description=Corsair Control fan and pump daemon
-Documentation=https://github.com/keprep/Corsair
+Documentation=https://github.com/repkep/Corsair
 After=multi-user.target
 
 [Service]
