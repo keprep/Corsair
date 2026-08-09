@@ -6,6 +6,7 @@ import logging
 from typing import Iterable
 
 from corsair_control.core.device import DeviceError, ManagedDevice, demo_devices
+from corsair_control.core.hwmon import discover_hwmon_backends
 
 log = logging.getLogger(__name__)
 
@@ -34,12 +35,14 @@ def discover(
     demo: bool = False,
     corsair_only: bool = True,
     initialize: bool = True,
+    include_hwmon: bool = True,
 ) -> DiscoveryResult:
     """Find supported devices and bring them up.
 
     ``corsair_only`` keeps the device list focused on what this application is
     named after; other liquidctl-supported hardware still works and can be
-    included by passing ``False``.
+    included by passing ``False``. ``include_hwmon`` adds mainboard fan
+    headers exposed by the kernel.
     """
     result = DiscoveryResult()
 
@@ -50,6 +53,9 @@ def discover(
             device.probe()
             result.devices.append(device)
         return result
+
+    if include_hwmon:
+        result.devices.extend(_discover_hwmon(result))
 
     try:
         backends = list(_iter_backends())
@@ -64,7 +70,7 @@ def discover(
 
     if not backends:
         result.errors.append(
-            "No supported device found. Check the USB connection and whether the "
+            "No supported USB device found. Check the connection and whether the "
             "udev rules are installed."
         )
         return result
@@ -104,6 +110,37 @@ def discover(
         result.errors.append("Devices were found, but none of them exposes a fan or pump channel.")
 
     return result
+
+
+def _discover_hwmon(result: DiscoveryResult) -> list[ManagedDevice]:
+    """Wrap every hwmon chip with PWM outputs as a device."""
+    devices: list[ManagedDevice] = []
+    try:
+        backends = discover_hwmon_backends()
+    except Exception as exc:  # pragma: no cover - defensive
+        result.errors.append(f"hwmon scan failed: {exc}")
+        return devices
+
+    for backend in backends:
+        device = ManagedDevice(backend)
+        try:
+            device.connect()
+            device.initialize()
+            device.probe()
+        except DeviceError as exc:
+            result.errors.append(f"{backend.description}: {exc}")
+            continue
+
+        writable = backend.any_writable
+        for channel in device.channels:
+            channel.controllable = backend.writable(channel.channel_id)
+        if not writable:
+            result.errors.append(
+                f"{backend.description}: mainboard fans are visible but not writable. "
+                "Run the corsair-controld service as root to control them."
+            )
+        devices.append(device)
+    return devices
 
 
 def release(devices: Iterable[ManagedDevice]) -> None:

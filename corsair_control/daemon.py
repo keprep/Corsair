@@ -28,6 +28,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}")
     parser.add_argument("--profile", metavar="NAME", help="profile to activate")
     parser.add_argument("--demo", action="store_true", help="simulated devices")
+    parser.add_argument(
+        "--no-mainboard-fans",
+        action="store_true",
+        help="skip the mainboard fan headers exposed through hwmon",
+    )
     parser.add_argument("--dry-run", action="store_true", help="never write duty cycles")
     parser.add_argument(
         "--restore-on-exit",
@@ -86,6 +91,9 @@ def main(argv: list[str] | None = None) -> int:
         store.activate(args.profile)
     elif settings.active_profile in store.profiles:
         store.activate(settings.active_profile)
+
+    if args.no_mainboard_fans:
+        settings.control_mainboard_fans = False
 
     engine = ControlEngine(settings, store, demo=args.demo, dry_run=args.dry_run)
     for problem in engine.discover():

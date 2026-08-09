@@ -10,10 +10,13 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
-from corsair_control.core.config import Settings
+from corsair_control.core.alarms import Alarm, AlarmMonitor
+from corsair_control.core.automation import AutomationEngine
+from corsair_control.core.calibration import CalibrationRunner, ChannelCalibration
+from corsair_control.core.config import Settings, state_dir
 from corsair_control.core.curve import CurveEvaluator
 from corsair_control.core.device import Channel, DeviceError, ManagedDevice
 from corsair_control.core.manager import discover, release
@@ -23,6 +26,7 @@ from corsair_control.core.profile import (
     ChannelConfig,
     ProfileStore,
 )
+from corsair_control.core.recorder import Recorder
 from corsair_control.core.sensors import Sensor, SensorHub
 
 log = logging.getLogger(__name__)
@@ -65,6 +69,10 @@ class Snapshot:
     sensors: dict[str, float] = field(default_factory=dict)
     emergency: bool = False
     messages: tuple[str, ...] = ()
+    alarms: tuple[Alarm, ...] = ()
+    new_alarms: tuple[Alarm, ...] = ()
+    automation_rule: str | None = None
+    calibrating: tuple[str, ...] = ()
 
     def device(self, key: str) -> DeviceSnapshot | None:
         for device in self.devices:
@@ -95,9 +103,21 @@ class ControlEngine:
         self.devices: list[ManagedDevice] = []
         self.startup_errors: list[str] = []
 
+        self.alarms = AlarmMonitor(settings=store.alarms)
+        self.automation = AutomationEngine(
+            rules=store.rules, default_profile=store.active_name
+        )
+        self.automation.enabled = store.automation_enabled
+        self.recorder = Recorder(
+            state_dir(),
+            enabled=settings.record_history,
+            retention_days=settings.history_retention_days,
+        )
+
         self._evaluators: dict[tuple[str, str], CurveEvaluator] = {}
         self._offloaded: set[tuple[str, str]] = set()
         self._overrides: dict[tuple[str, str], float] = {}
+        self._calibrating: set[tuple[str, str]] = set()
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -118,7 +138,7 @@ class ControlEngine:
             self.sensors.unregister_prefix("dev:")
 
             self.sensors.discover(demo=self.demo)
-            result = discover(demo=self.demo)
+            result = discover(demo=self.demo, include_hwmon=self.settings.control_mainboard_fans)
             self.devices = result.devices
             self.startup_errors = list(result.errors)
 
@@ -177,6 +197,7 @@ class ControlEngine:
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
+        self.recorder.prune()
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, name="corsair-engine", daemon=True)
         self._thread.start()
@@ -196,9 +217,14 @@ class ControlEngine:
         """Hand the hardware back in a state that cannot cook anything.
 
         Called on shutdown: without it a device keeps the last duty we wrote,
-        which may be a quiet 25 % while the machine is under load.
+        which may be a quiet 25 % while the machine is under load. Mainboard
+        headers go back to the BIOS controller instead, which is strictly
+        better than any fixed value we could pick.
         """
         for device in self.devices:
+            if device.is_hwmon:
+                device.restore_automatic()
+                continue
             for channel in device.channels:
                 if not channel.controllable:
                     continue
@@ -235,10 +261,15 @@ class ControlEngine:
     # ------------------------------------------------------------------
     # profile handling
     # ------------------------------------------------------------------
-    def set_profile(self, name: str) -> None:
+    def set_profile(self, name: str, *, manual: bool = True) -> None:
         with self._lock:
             self.store.activate(name)
             self.settings.active_profile = name
+            if manual:
+                # Remember the choice so the automation does not immediately
+                # switch back to the same profile it last picked.
+                self.automation.note_manual_change(name)
+                self.automation.default_profile = name
             self._evaluators.clear()
             self._offloaded.clear()
             self._overrides.clear()
@@ -255,6 +286,11 @@ class ControlEngine:
                 self._evaluators.clear()
                 self._offloaded.clear()
                 self._overrides.clear()
+                # A full reload replaces the store's rule list and alarm
+                # settings objects, so the engine has to be re-pointed at them.
+                self.automation.rules = self.store.rules
+                self.automation.enabled = self.store.automation_enabled
+                self.alarms.settings = self.store.alarms
         self.wake()
 
     def set_override(self, device_key: str, channel_id: str, duty: float | None) -> None:
@@ -290,6 +326,7 @@ class ControlEngine:
 
             sensor_values = self.sensors.poll()
             emergency = self._check_emergency(sensor_values)
+            self._run_automation()
 
             device_snapshots: list[DeviceSnapshot] = []
             profile = self.store.active
@@ -301,10 +338,9 @@ class ControlEngine:
 
                 for channel in device.channels:
                     config = device_config.channel(channel.channel_id)
-                    target, sensor_id, sensor_value, error = self._evaluate(
-                        device, channel, config, emergency
+                    target, sensor_value, error = self._evaluate(
+                        device, channel, config, emergency, sensor_values
                     )
-                    sensor = self.sensors.get(sensor_id) if sensor_id else None
                     channel_snapshots.append(
                         ChannelSnapshot(
                             device_key=device.key,
@@ -317,8 +353,8 @@ class ControlEngine:
                             duty=status.duties.get(channel.channel_id)
                             or device.applied_duty(channel.channel_id),
                             target_duty=target,
-                            sensor_id=sensor_id,
-                            sensor_label=sensor.label if sensor else "",
+                            sensor_id=config.sensor_id,
+                            sensor_label=self.source_label(config),
                             sensor_value=sensor_value,
                             error=error,
                         )
@@ -348,7 +384,17 @@ class ControlEngine:
                 sensors=sensor_values,
                 emergency=emergency,
                 messages=tuple(messages),
+                automation_rule=(
+                    self.automation.active_rule.name if self.automation.active_rule else None
+                ),
+                calibrating=tuple(f"{d}/{c}" for d, c in self._calibrating),
             )
+
+            raised, _cleared = self.alarms.evaluate(snapshot)
+            snapshot = replace(
+                snapshot, alarms=tuple(self.alarms.active), new_alarms=tuple(raised)
+            )
+            self.recorder.record(snapshot, self._sensor_labels())
 
         self._snapshot = snapshot
         for callback in list(self._subscribers):
@@ -374,50 +420,63 @@ class ControlEngine:
             log.info("Emergency cleared")
         return False
 
+    def source_label(self, config: ChannelConfig) -> str:
+        """Human-readable summary of a channel's temperature sources."""
+        labels = []
+        for source in config.sources:
+            sensor = self.sensors.get(source.sensor_id)
+            labels.append(sensor.label if sensor else source.sensor_id)
+        if not labels:
+            return ""
+        if len(labels) == 1:
+            return labels[0]
+        short = [label.split(" · ")[0] for label in labels]
+        return f"{' + '.join(short)} ({config.source_mode})"
+
     def _evaluate(
         self,
         device: ManagedDevice,
         channel: Channel,
         config: ChannelConfig,
         emergency: bool,
-    ) -> tuple[float | None, str | None, float | None, str | None]:
+        sensor_values: dict[str, float],
+    ) -> tuple[float | None, float | None, str | None]:
         key = (device.key, channel.channel_id)
-        sensor_id = config.sensor_id
-        sensor_value = self.sensors.value(sensor_id) if sensor_id else None
+        sensor_value = config.temperature(sensor_values)
 
-        if not channel.controllable:
-            return None, sensor_id, sensor_value, None
-        if self._paused:
-            return None, sensor_id, sensor_value, None
+        if not channel.controllable or self._paused or key in self._calibrating:
+            return None, sensor_value, None
 
         if emergency:
-            return self._write(device, channel, 100.0, key, force=True), sensor_id, sensor_value, None
+            return self._write(device, channel, 100.0, key, force=True), sensor_value, None
 
         override = self._overrides.get(key)
         if override is not None:
-            return self._write(device, channel, config.clamp(override), key), sensor_id, sensor_value, None
+            return self._write(device, channel, config.clamp(override), key), sensor_value, None
 
         if config.mode == MODE_MANUAL:
-            return None, sensor_id, sensor_value, None
+            return None, sensor_value, None
 
         if config.mode == MODE_FIXED:
             duty = config.clamp(config.fixed_duty)
-            return self._write(device, channel, duty, key), sensor_id, sensor_value, None
+            return self._write(device, channel, duty, key), sensor_value, None
 
         # curve mode
         if config.offload_to_hardware and device.supports_hardware_curves:
             if key not in self._offloaded:
                 try:
-                    device.set_speed_profile(channel.channel_id, [p.as_tuple() for p in config.curve.points])
+                    device.set_speed_profile(
+                        channel.channel_id, [p.as_tuple() for p in config.curve.points]
+                    )
                     self._offloaded.add(key)
                 except DeviceError as exc:
-                    return None, sensor_id, sensor_value, str(exc)
-            return None, sensor_id, sensor_value, None
+                    return None, sensor_value, str(exc)
+            return None, sensor_value, None
 
-        if sensor_id is None or sensor_value is None:
+        if sensor_value is None:
             fallback = self.sensors.hottest()
             if fallback is None:
-                return None, sensor_id, sensor_value, "no temperature source available"
+                return None, sensor_value, "no temperature source available"
             sensor_value = fallback
 
         evaluator = self._evaluators.get(key)
@@ -428,8 +487,94 @@ class ControlEngine:
         raw = evaluator.feed(sensor_value, config.curve, time.monotonic())
         target = config.clamp(evaluator.committed_duty or 0.0)
         if raw is None:
-            return target, sensor_id, sensor_value, None
-        return self._write(device, channel, config.clamp(raw), key), sensor_id, sensor_value, None
+            return target, sensor_value, None
+        return self._write(device, channel, config.clamp(raw), key), sensor_value, None
+
+    def _sensor_labels(self) -> dict[str, str]:
+        return {sensor.sensor_id: sensor.label for sensor in self.sensors.sensors}
+
+    # ------------------------------------------------------------------
+    # automation
+    # ------------------------------------------------------------------
+    def _run_automation(self) -> None:
+        if not self.automation.enabled or not self.automation.rules:
+            return
+        context = self.automation.context(hottest=self.sensors.hottest())
+        target = self.automation.choose(context)
+        if target and target != self.store.active_name:
+            log.info("Automation switches to profile '%s'", target)
+            self.set_profile(target, manual=False)
+
+    # ------------------------------------------------------------------
+    # calibration
+    # ------------------------------------------------------------------
+    @property
+    def calibrating(self) -> set[tuple[str, str]]:
+        return set(self._calibrating)
+
+    def calibrate(
+        self,
+        device_key: str,
+        channel_id: str,
+        *,
+        progress=None,
+        cancel=None,
+        settle_seconds: float = 3.5,
+        samples: int = 3,
+        sample_interval: float = 0.4,
+    ) -> ChannelCalibration:
+        """Sweep one channel and store the result in the active profile.
+
+        The channel is excluded from the control loop while this runs, and the
+        loop keeps servicing everything else - a calibration takes a minute or
+        two and the rest of the machine still needs cooling.
+        """
+        device = self.device_by_key(device_key)
+        if device is None:
+            raise DeviceError("device is gone")
+        channel = next((c for c in device.channels if c.channel_id == channel_id), None)
+        if channel is None or not channel.controllable:
+            raise DeviceError("this channel cannot be controlled")
+
+        key = (device_key, channel_id)
+        previous = device.applied_duty(channel_id)
+        with self._lock:
+            self._calibrating.add(key)
+
+        def read_rpm() -> float | None:
+            device.refresh()
+            return device.last_status.speeds.get(channel_id)
+
+        runner = CalibrationRunner(
+            set_duty=lambda duty: device.set_duty(channel_id, duty),
+            read_rpm=read_rpm,
+            settle_seconds=settle_seconds,
+            samples=samples,
+            sample_interval=sample_interval,
+        )
+        try:
+            result = runner.run(progress=progress, cancel=cancel)
+        finally:
+            with self._lock:
+                self._calibrating.discard(key)
+                self._evaluators.pop(key, None)
+            if previous is not None:
+                try:
+                    device.set_duty(channel_id, previous)
+                except DeviceError:  # pragma: no cover - best effort
+                    pass
+
+        config = self.store.active.device(device_key).channel(channel_id)
+        config.calibration = result
+        suggestion = result.safe_minimum()
+        if suggestion is not None and config.min_duty < suggestion and not config.allow_zero_rpm:
+            config.min_duty = round(suggestion, 1)
+        try:
+            self.store.save()
+        except OSError as exc:
+            log.warning("Cannot store the calibration: %s", exc)
+        self.wake()
+        return result
 
     def _write(
         self,
@@ -462,12 +607,31 @@ class ControlEngine:
                 return device
         return None
 
-    def apply_lighting(self, device_key: str, channel_id: str, mode: str, colors) -> str | None:
+    def apply_lighting(
+        self,
+        device_key: str,
+        channel_id: str,
+        mode: str,
+        colors,
+        *,
+        speed: str | None = None,
+        direction: str | None = None,
+    ) -> str | None:
         device = self.device_by_key(device_key)
         if device is None:
             return "device is gone"
         try:
-            device.set_lighting(channel_id, mode, colors)
+            device.set_lighting(channel_id, mode, colors, speed=speed, direction=direction)
+        except DeviceError as exc:
+            return str(exc)
+        return None
+
+    def apply_screen(self, device_key: str, channel_id: str, mode: str, value: str) -> str | None:
+        device = self.device_by_key(device_key)
+        if device is None:
+            return "device is gone"
+        try:
+            device.set_screen(channel_id, mode, value)
         except DeviceError as exc:
             return str(exc)
         return None

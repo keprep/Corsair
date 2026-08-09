@@ -8,6 +8,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
 
+from corsair_control.core.alarms import AlarmSettings
+from corsair_control.core.automation import Rule
+from corsair_control.core.calibration import ChannelCalibration
 from corsair_control.core.config import config_dir, ensure_dirs, profiles_path
 from corsair_control.core.curve import FanCurve, preset_curve
 
@@ -19,17 +22,87 @@ MODE_MANUAL = "manual"  # leave the channel alone entirely
 MODES = (MODE_CURVE, MODE_FIXED, MODE_MANUAL)
 
 
+SOURCE_MAX = "max"
+SOURCE_AVERAGE = "average"
+SOURCE_WEIGHTED = "weighted"
+SOURCE_MODES = (SOURCE_MAX, SOURCE_AVERAGE, SOURCE_WEIGHTED)
+
+
+@dataclass
+class SensorSource:
+    """One temperature feeding a channel, with its weight for mixing."""
+
+    sensor_id: str
+    weight: float = 1.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"sensor_id": self.sensor_id, "weight": round(self.weight, 3)}
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "SensorSource":
+        if isinstance(data, str):
+            return cls(sensor_id=data)
+        return cls(
+            sensor_id=str(data.get("sensor_id", "")),
+            weight=float(data.get("weight", 1.0)),
+        )
+
+
+def combine(values: list[float], weights: list[float], mode: str) -> float | None:
+    """Reduce several temperatures to the one the curve is evaluated at."""
+    if not values:
+        return None
+    if mode == SOURCE_AVERAGE:
+        return sum(values) / len(values)
+    if mode == SOURCE_WEIGHTED:
+        total = sum(weights)
+        if total <= 0:
+            return max(values)
+        return sum(v * w for v, w in zip(values, weights)) / total
+    return max(values)
+
+
 @dataclass
 class ChannelConfig:
     mode: str = MODE_CURVE
     fixed_duty: float = 50.0
-    sensor_id: str | None = None
+    sources: list[SensorSource] = field(default_factory=list)
+    source_mode: str = SOURCE_MAX
     curve: FanCurve = field(default_factory=FanCurve)
     min_duty: float = 0.0
     max_duty: float = 100.0
     allow_zero_rpm: bool = False
     offload_to_hardware: bool = False
+    calibration: ChannelCalibration | None = None
 
+    # ------------------------------------------------------------------
+    # sources
+    # ------------------------------------------------------------------
+    @property
+    def sensor_id(self) -> str | None:
+        """The first source - kept for the many places that want just one."""
+        return self.sources[0].sensor_id if self.sources else None
+
+    @sensor_id.setter
+    def sensor_id(self, value: str | None) -> None:
+        self.sources = [SensorSource(value)] if value else []
+
+    @property
+    def sensor_ids(self) -> list[str]:
+        return [s.sensor_id for s in self.sources]
+
+    def set_sensor_ids(self, ids: list[str]) -> None:
+        """Replace the source list, keeping the weight of anything retained."""
+        weights = {s.sensor_id: s.weight for s in self.sources}
+        self.sources = [SensorSource(i, weights.get(i, 1.0)) for i in ids if i]
+
+    def temperature(self, values: dict[str, float]) -> float | None:
+        readings = [(s, values[s.sensor_id]) for s in self.sources if s.sensor_id in values]
+        if not readings:
+            return None
+        return combine([v for _, v in readings], [s.weight for s, _ in readings], self.source_mode)
+
+    # ------------------------------------------------------------------
     def clamp(self, duty: float) -> float:
         """Apply the per-channel limits, including the zero-RPM guard."""
         duty = max(self.min_duty, min(self.max_duty, duty))
@@ -41,26 +114,38 @@ class ChannelConfig:
         return {
             "mode": self.mode,
             "fixed_duty": self.fixed_duty,
-            "sensor_id": self.sensor_id,
+            "sources": [s.to_dict() for s in self.sources],
+            "source_mode": self.source_mode,
             "curve": self.curve.to_list(),
             "min_duty": self.min_duty,
             "max_duty": self.max_duty,
             "allow_zero_rpm": self.allow_zero_rpm,
             "offload_to_hardware": self.offload_to_hardware,
+            "calibration": self.calibration.to_dict() if self.calibration else None,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ChannelConfig":
         mode = str(data.get("mode", MODE_CURVE))
+        raw_sources = data.get("sources")
+        if raw_sources:
+            sources = [SensorSource.from_dict(entry) for entry in raw_sources]
+        else:
+            # Profiles written before multi-sensor curves existed.
+            legacy = data.get("sensor_id")
+            sources = [SensorSource(str(legacy))] if legacy else []
+        source_mode = str(data.get("source_mode", SOURCE_MAX))
         return cls(
             mode=mode if mode in MODES else MODE_CURVE,
             fixed_duty=float(data.get("fixed_duty", 50.0)),
-            sensor_id=data.get("sensor_id"),
+            sources=[s for s in sources if s.sensor_id],
+            source_mode=source_mode if source_mode in SOURCE_MODES else SOURCE_MAX,
             curve=FanCurve.from_list(data.get("curve")),
             min_duty=float(data.get("min_duty", 0.0)),
             max_duty=float(data.get("max_duty", 100.0)),
             allow_zero_rpm=bool(data.get("allow_zero_rpm", False)),
             offload_to_hardware=bool(data.get("offload_to_hardware", False)),
+            calibration=ChannelCalibration.from_dict(data.get("calibration")),
         )
 
 
@@ -68,29 +153,73 @@ class ChannelConfig:
 class LightingConfig:
     mode: str = "fixed"
     colors: list[list[int]] = field(default_factory=lambda: [[240, 165, 0]])
+    speed: str | None = None
+    direction: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {"mode": self.mode, "colors": self.colors}
+        return {
+            "mode": self.mode,
+            "colors": self.colors,
+            "speed": self.speed,
+            "direction": self.direction,
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LightingConfig":
         colors = data.get("colors") or [[240, 165, 0]]
-        return cls(mode=str(data.get("mode", "fixed")), colors=[list(c) for c in colors])
+        return cls(
+            mode=str(data.get("mode", "fixed")),
+            colors=[list(c) for c in colors],
+            speed=data.get("speed") or None,
+            direction=data.get("direction") or None,
+        )
+
+
+@dataclass
+class ScreenConfig:
+    """State of an LCD screen, where the device has one."""
+
+    mode: str = "liquid"
+    value: str = ""
+    brightness: int = 80
+    orientation: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "value": self.value,
+            "brightness": self.brightness,
+            "orientation": self.orientation,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ScreenConfig":
+        return cls(
+            mode=str(data.get("mode", "liquid")),
+            value=str(data.get("value", "")),
+            brightness=int(data.get("brightness", 80)),
+            orientation=int(data.get("orientation", 0)),
+        )
 
 
 @dataclass
 class DeviceConfig:
     channels: dict[str, ChannelConfig] = field(default_factory=dict)
     lighting: dict[str, LightingConfig] = field(default_factory=dict)
+    screens: dict[str, ScreenConfig] = field(default_factory=dict)
     pump_mode: str | None = None
 
     def channel(self, channel_id: str) -> ChannelConfig:
         return self.channels.setdefault(channel_id, ChannelConfig())
 
+    def screen(self, channel_id: str) -> ScreenConfig:
+        return self.screens.setdefault(channel_id, ScreenConfig())
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "channels": {k: v.to_dict() for k, v in self.channels.items()},
             "lighting": {k: v.to_dict() for k, v in self.lighting.items()},
+            "screens": {k: v.to_dict() for k, v in self.screens.items()},
             "pump_mode": self.pump_mode,
         }
 
@@ -102,6 +231,9 @@ class DeviceConfig:
             },
             lighting={
                 k: LightingConfig.from_dict(v) for k, v in (data.get("lighting") or {}).items()
+            },
+            screens={
+                k: ScreenConfig.from_dict(v) for k, v in (data.get("screens") or {}).items()
             },
             pump_mode=data.get("pump_mode"),
         )
@@ -138,6 +270,11 @@ class ProfileStore:
         self.path = path or profiles_path()
         self.profiles: dict[str, Profile] = {}
         self.active_name: str = "Default"
+        #: Automation rules and alarm thresholds live in the same file so the
+        #: daemon picks up a change with the same reload it already does.
+        self.rules: list[Rule] = []
+        self.automation_enabled: bool = False
+        self.alarms = AlarmSettings()
         #: True when the profiles were read from the system-wide file the
         #: daemon writes. Saving still goes to :attr:`path`.
         self.loaded_from_system = False
@@ -166,6 +303,10 @@ class ProfileStore:
             for name, data in (raw.get("profiles") or {}).items()
         }
         self.active_name = str(raw.get("active", "Default"))
+        automation = raw.get("automation") or {}
+        self.rules = [Rule.from_dict(entry) for entry in automation.get("rules") or []]
+        self.automation_enabled = bool(automation.get("enabled", False))
+        self.alarms = AlarmSettings.from_dict(raw.get("alarms"))
         if not self.profiles:
             self._bootstrap()
         elif self.active_name not in self.profiles:
@@ -179,9 +320,14 @@ class ProfileStore:
     def save(self) -> None:
         ensure_dirs()
         payload = {
-            "version": 1,
+            "version": 2,
             "active": self.active_name,
             "profiles": {name: profile.to_dict() for name, profile in self.profiles.items()},
+            "automation": {
+                "enabled": self.automation_enabled,
+                "rules": [rule.to_dict() for rule in self.rules],
+            },
+            "alarms": self.alarms.to_dict(),
         }
         target = self.path
         try:
@@ -258,7 +404,7 @@ class ProfileStore:
                     continue
                 device.channels[channel.channel_id] = ChannelConfig(
                     mode=MODE_CURVE if channel.controllable else MODE_MANUAL,
-                    sensor_id=default_sensor,
+                    sources=[SensorSource(default_sensor)] if default_sensor else [],
                     curve=preset_curve(preset, pump=channel.is_pump),
                     min_duty=channel.default_floor,
                 )
@@ -275,7 +421,7 @@ class ProfileStore:
                     continue
                 device.channels[channel.channel_id] = ChannelConfig(
                     mode=MODE_CURVE if channel.controllable else MODE_MANUAL,
-                    sensor_id=default_sensor,
+                    sources=[SensorSource(default_sensor)] if default_sensor else [],
                     curve=preset_curve("Balanced", pump=channel.is_pump),
                     min_duty=channel.default_floor,
                 )

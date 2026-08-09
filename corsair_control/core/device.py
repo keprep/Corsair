@@ -59,6 +59,19 @@ class LightingChannel:
     channel_id: str
     label: str
     modes: list[str] = field(default_factory=list)
+    supports_speed: bool = False
+    supports_direction: bool = False
+    #: Upper bound the UI offers; drivers reject what they cannot use.
+    max_colors: int = 4
+
+
+@dataclass
+class ScreenChannel:
+    """An LCD panel, where liquidctl exposes one."""
+
+    channel_id: str
+    label: str
+    modes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -101,6 +114,7 @@ class ManagedDevice:
         self.demo = demo
         self.channels: list[Channel] = []
         self.lighting_channels: list[LightingChannel] = []
+        self.screen_channels: list[ScreenChannel] = []
         self.pump_modes: list[str] = []
         self.last_status = DeviceStatus()
         self.last_error: str | None = None
@@ -122,13 +136,22 @@ class ManagedDevice:
         """Stable identifier used as the profile key.
 
         Serial numbers would be nicer but reading them requires the device to
-        be accessible, so the USB coordinates are the dependable fallback.
+        be accessible, so the USB coordinates are the dependable fallback. A
+        backend that knows a better identifier (hwmon does) can provide one.
         """
+        own = getattr(self._dev, "stable_key", None)
+        if own:
+            return str(own).replace("/", "_")
+
         vid = getattr(self._dev, "vendor_id", 0) or 0
         pid = getattr(self._dev, "product_id", 0) or 0
         bus = getattr(self._dev, "bus", "") or ""
         address = getattr(self._dev, "address", "") or ""
         return f"{vid:04x}:{pid:04x}:{bus}:{address}".replace("/", "_")
+
+    @property
+    def is_hwmon(self) -> bool:
+        return getattr(self._dev, "bus", "") == "hwmon"
 
     @property
     def bus_info(self) -> str:
@@ -177,6 +200,7 @@ class ManagedDevice:
         with self._lock:
             self.pump_modes = self._discover_pump_modes()
             self.lighting_channels = self._discover_lighting()
+            self.screen_channels = self._discover_screens()
             status = self.refresh()
             self.channels = self._discover_channels(status)
             # A driver can accept a ``pump_mode`` argument on a model that has
@@ -309,7 +333,63 @@ class ManagedDevice:
                 return []
             names = ["led"]
 
-        return [LightingChannel(channel_id=n, label=_title(n) or n, modes=modes) for n in names]
+        speed = direction = False
+        try:
+            parameters = inspect.signature(self._dev.set_color).parameters
+            speed = "speed" in parameters
+            direction = "direction" in parameters
+        except (TypeError, ValueError):  # pragma: no cover - exotic drivers
+            pass
+
+        return [
+            LightingChannel(
+                channel_id=n,
+                label=_title(n) or n,
+                modes=modes,
+                supports_speed=speed,
+                supports_direction=direction,
+            )
+            for n in names
+        ]
+
+    def _discover_screens(self) -> list[ScreenChannel]:
+        """LCD panels. Only a few drivers have them, so probe carefully."""
+        if not hasattr(self._dev, "set_screen"):
+            return []
+        names: list[str] = []
+        declared = False
+        for attr in ("_screen_channels", "_lcd_channels"):
+            value = getattr(self._dev, attr, None)
+            if isinstance(value, dict):
+                names = [str(k) for k in value]
+                declared = True
+                break
+            if isinstance(value, (list, tuple, set)):
+                names = [str(v) for v in value]
+                declared = True
+                break
+        if declared and not names:
+            # The driver says explicitly that this model has no panel.
+            return []
+        if not names:
+            names = ["lcd"]
+
+        modes: list[str] = []
+        for attr in dir(type(self._dev)):
+            lowered = attr.lower()
+            if "screen" not in lowered or "mode" not in lowered:
+                continue
+            value = getattr(type(self._dev), attr, None)
+            if isinstance(value, dict) and value:
+                modes = [str(k) for k in value]
+                break
+            if isinstance(value, (list, tuple, set)) and value:
+                modes = [str(v) for v in value]
+                break
+        if not modes:
+            modes = ["liquid", "static", "gif", "brightness", "orientation"]
+
+        return [ScreenChannel(channel_id=n, label=_title(n) or n, modes=modes) for n in names]
 
     # ------------------------------------------------------------------
     # status
@@ -428,12 +508,29 @@ class ManagedDevice:
             except Exception as exc:
                 raise DeviceError(self._explain(exc)) from exc
 
-    def set_lighting(self, channel_id: str, mode: str, colors: Sequence[Sequence[int]]) -> None:
+    def set_lighting(
+        self,
+        channel_id: str,
+        mode: str,
+        colors: Sequence[Sequence[int]],
+        *,
+        speed: str | None = None,
+        direction: str | None = None,
+    ) -> None:
+        channel = next(
+            (c for c in self.lighting_channels if c.channel_id == channel_id), None
+        )
+        extra: dict[str, Any] = {}
+        if speed and (channel is None or channel.supports_speed):
+            extra["speed"] = speed
+        if direction and (channel is None or channel.supports_direction):
+            extra["direction"] = direction
+
         with self._lock:
             self.connect()
             payload = [list(c) for c in colors]
             try:
-                self._dev.set_color(channel=channel_id, mode=mode, colors=payload)
+                self._dev.set_color(channel=channel_id, mode=mode, colors=payload, **extra)
             except TypeError:
                 try:
                     self._dev.set_color(channel_id, mode, payload)
@@ -445,6 +542,36 @@ class ManagedDevice:
     @property
     def supports_lighting(self) -> bool:
         return bool(self.lighting_channels) and hasattr(self._dev, "set_color")
+
+    def set_screen(self, channel_id: str, mode: str, value: str) -> None:
+        with self._lock:
+            self.connect()
+            try:
+                self._dev.set_screen(channel=channel_id, mode=mode, value=value)
+            except TypeError:
+                try:
+                    self._dev.set_screen(channel_id, mode, value)
+                except Exception as exc:
+                    raise DeviceError(self._explain(exc)) from exc
+            except Exception as exc:
+                raise DeviceError(self._explain(exc)) from exc
+
+    @property
+    def supports_screen(self) -> bool:
+        return bool(self.screen_channels)
+
+    def restore_automatic(self) -> None:
+        """Hand control back to whatever owned the fans before us.
+
+        Only hwmon can actually do this; for USB devices it is a no-op.
+        """
+        restore = getattr(self._dev, "restore_automatic", None)
+        if callable(restore):
+            with self._lock:
+                try:
+                    restore()
+                except Exception as exc:  # pragma: no cover - best effort
+                    log.debug("restore_automatic failed for %s: %s", self.key, exc)
 
 
 # ----------------------------------------------------------------------
@@ -465,8 +592,18 @@ class _DemoBackend:
     serial_number = "DEMO-0001"
 
     _speed_channels = {"fan1": None, "fan2": None, "fan3": None, "pump": None}
-    _COLOR_MODES = {"fixed": 0, "breathing": 1, "rainbow": 2, "off": 3}
-    _color_channels = {"led": 0}
+    _COLOR_MODES = {
+        "fixed": 0,
+        "breathing": 1,
+        "rainbow": 2,
+        "color-shift": 3,
+        "color-pulse": 4,
+        "marquee": 5,
+        "off": 6,
+    }
+    _color_channels = {"led": 0, "ring": 1}
+    _SCREEN_MODES = {"liquid": 0, "static": 1, "gif": 2, "brightness": 3, "orientation": 4}
+    _screen_channels = {"lcd": 0}
 
     def __init__(self) -> None:
         self._duties = {"fan1": 40.0, "fan2": 40.0, "fan3": 40.0, "pump": 70.0}
@@ -527,9 +664,24 @@ class _DemoBackend:
         if channel not in self._duties and channel != "fan":
             raise ValueError(f"unknown channel {channel}")
 
-    def set_color(self, channel: str, mode: str, colors: Sequence[Sequence[int]], **_: Any) -> None:
+    def set_color(
+        self,
+        channel: str,
+        mode: str,
+        colors: Sequence[Sequence[int]],
+        speed: str = "normal",
+        **_: Any,
+    ) -> None:
         if mode not in self._COLOR_MODES:
             raise ValueError(f"unsupported mode {mode}")
+        if channel not in self._color_channels:
+            raise ValueError(f"unknown lighting channel {channel}")
+
+    def set_screen(self, channel: str, mode: str, value: str, **_: Any) -> None:
+        if channel not in self._screen_channels:
+            raise ValueError(f"unknown screen channel {channel}")
+        if mode not in self._SCREEN_MODES:
+            raise ValueError(f"unsupported screen mode {mode}")
 
 
 class _DemoCommanderBackend(_DemoBackend):
@@ -538,6 +690,11 @@ class _DemoCommanderBackend(_DemoBackend):
     address = "demo1"
     serial_number = "DEMO-0002"
     _speed_channels = {f"fan{i}": None for i in range(1, 7)}
+    _color_channels = {"led": 0}
+    _screen_channels: dict[str, int] = {}
+
+    def set_screen(self, channel: str, mode: str, value: str, **_: Any) -> None:
+        raise ValueError("this device has no screen")
 
     def __init__(self) -> None:
         super().__init__()

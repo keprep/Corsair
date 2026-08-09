@@ -17,6 +17,11 @@ SUBSYSTEM=="usb", ATTRS{idVendor}=="1b1c", MODE="0660", TAG+="uaccess"
 KERNEL=="hidraw*", ATTRS{idVendor}=="1b1c", MODE="0660", TAG+="uaccess"
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b1c", MODE="0660", TAG+="uaccess"
 
+# Mainboard fan headers live in sysfs (/sys/class/hwmon/*/pwmN) and are
+# root-only by design. There is no udev tag that changes that safely, so the
+# background service (corsair-controld, running as root) is the supported way
+# to control them. Corsair hardware on USB does not need root.
+
 # Corsair AXi / HXi power supplies speak over a serial bridge
 SUBSYSTEM=="usb", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1c00", MODE="0660", TAG+="uaccess"
 SUBSYSTEM=="usb", ATTRS{idVendor}=="1b1c", ATTRS{idProduct}=="1c01", MODE="0660", TAG+="uaccess"

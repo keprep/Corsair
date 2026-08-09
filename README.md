@@ -9,6 +9,8 @@ Hintergrund, der die Kurven auch ohne offenes Fenster weiterfährt.
 
 ![Kurven-Editor](docs/screenshot-curves.png)
 
+![Automatik](docs/screenshot-automation.png)
+
 ![Einstellungen](docs/screenshot-settings.png)
 
 ---
@@ -17,12 +19,27 @@ Hintergrund, der die Kurven auch ohne offenes Fenster weiterfährt.
 
 * **Automatische Geräteerkennung** über [liquidctl](https://github.com/liquidctl/liquidctl)
   – Hydro-/iCUE-AIOs, Commander Pro, Commander Core, Lüfter-Hubs.
+* **Mainboard-Lüfter inklusive**: Kanäle aus `/sys/class/hwmon/*/pwmN` laufen
+  über dieselben Kurven und Profile wie die Corsair-Hardware. Schreiben braucht
+  root – dafür gibt es den Dienst.
 * **Lüfterkurven mit der Maus**: Punkte ziehen, Doppelklick fügt hinzu,
   Rechtsklick entfernt. Der aktuelle Betriebspunkt wird live auf der Kurve
   eingezeichnet.
+* **Mehrere Temperaturquellen pro Kanal**: „wärmster von CPU und GPU“,
+  Mittelwert oder gewichtete Mischung – wählbar pro Kanal.
 * **Freie Temperaturquelle pro Kanal**: CPU, GPU, Wassertemperatur der AIO,
   NVMe – alles was unter `/sys/class/hwmon` auftaucht, dazu NVIDIA-GPUs über
   `nvidia-smi` und virtuelle Sensoren wie „heißster CPU-Sensor“.
+* **Lüfter-Kalibrierung**: einmal 0 → 100 % durchfahren, dann kennt die App die
+  Drehzahl je Stufe, den Stillstandspunkt und die Anlaufleistung. Der
+  Kurven-Editor schattiert danach den Bereich, in dem dieser Lüfter steht, und
+  zeigt zu jedem Punkt die zu erwartende Drehzahl.
+* **Automatische Profilumschaltung** nach laufendem Prozess, Uhrzeit,
+  Netz-/Akkubetrieb oder Temperatur – mit Prioritäten.
+* **Alarme** für stille Fehler: Pumpe unter Mindestdrehzahl, Lüfter steht trotz
+  Sollwert, Gerät verschwunden, Temperatur über Warnschwelle.
+* **Aufzeichnung**: Messwerte laufend in eine Tages-CSV, plus Export des
+  aktuellen Verlaufs auf Knopfdruck.
 * **Ruhiges Regelverhalten**: gleitender Mittelwert auf der Temperatur plus
   Hysterese auf der Ausgabe. Hochdrehen darf die Regelung schnell, runter nur
   träge – sonst atmen die Lüfter hörbar um jeden Kurvenknick herum.
@@ -33,7 +50,10 @@ Hintergrund, der die Kurven auch ohne offenes Fenster weiterfährt.
   0 U/min muss man pro Kanal ausdrücklich erlauben.
 * **Notfallabschaltung nach oben**: ab einer einstellbaren Temperatur
   (Vorgabe 90 °C) gehen alle Kanäle auf 100 %, unabhängig von der Kurve.
-* **Beleuchtung**: statische Farbe und die Modi, die der jeweilige Treiber meldet.
+* **Beleuchtung**: Modi des Treibers, mehrere Farben pro Modus, Geschwindigkeit
+  und Richtung wo unterstützt, plus „auf alle Geräte anwenden“.
+* **LCD-Displays** (experimentell): Geräte mit `set_screen` bekommen einen
+  Block für Modus, Bild/GIF, Helligkeit und Ausrichtung.
 * **Optik**: dunkles Thema mit wählbarer Akzentfarbe, animierte Anzeigen,
   Verlaufsdiagramm mit Fadenkreuz beim Überfahren.
 * **Hintergrunddienst** (`corsair-controld`) mit systemd-Unit, damit die Kurven
@@ -65,6 +85,7 @@ unter anderem:
 | Commander Pro, Lighting Node Pro/Core | Hardware-Kurven möglich |
 | Obsidian 1000D Commander | wie Commander Pro |
 | HXi/AXi-Netzteile | nur Auslesen, kein Lüfterkanal |
+| Mainboard-Lüfteranschlüsse | über hwmon (`nct6xxx`, `it87` …), Schreiben nur als root |
 
 Ob dein Gerät dabei ist, sagt dir:
 
@@ -135,6 +156,39 @@ corsair-control --lang en       # Oberfläche auf Englisch
    feinfühlig (mit Shift in 5er-Schritten).
 
 Änderungen wirken sofort und werden nach kurzer Zeit automatisch gespeichert.
+
+**Mehrere Sensoren pro Kanal**: Der Sensor-Knopf auf der Kanal-Karte öffnet eine
+Liste zum Ankreuzen. Sind mehrere gewählt, entscheidet der Modus unten im Menü,
+was daraus wird – „Wärmster“ ist die Vorgabe und meist die richtige Antwort.
+
+**Kalibrierung**: Der Knopf „Lüfter kalibrieren“ im Kurven-Editor fährt den
+Kanal einmal durch. Das dauert ein bis zwei Minuten, der Lüfter wird laut und
+bleibt zwischendurch stehen – danach kennt die App seine Kennlinie und hebt bei
+Bedarf die Untergrenze auf einen Wert an, bei dem er sicher weiterläuft.
+
+### Automatische Profile
+
+Auf der Seite „Automatik“ legst du Regeln an: Bedingung → Profil. Bedingungen
+sind Prozessname (Teilstring, z. B. `steam`), Zeitfenster (auch über Mitternacht),
+Netz- oder Akkubetrieb und eine Temperaturschwelle. Mehrere Bedingungen in einer
+Regel gelten mit **und**. Passt mehr als eine Regel, gewinnt die höchste
+Priorität; passt keine, kommt das zuletzt von Hand gewählte Profil zurück.
+
+### Alarme
+
+Standardmäßig aktiv: Pumpe unter 400 U/min, Lüfter mit ≥ 25 % Sollwert aber
+0 U/min, Gerät nicht mehr erreichbar, Temperatur über 85 °C. Eine Bedingung muss
+einige Sekunden anhalten, bevor sie meldet – ein einzelner Ausreißer im
+Tachosignal ist kein Fehler. Alarme erscheinen als Banner und als
+Systembenachrichtigung.
+
+### Aufzeichnung
+
+In den Einstellungen lässt sich die laufende Aufzeichnung einschalten; sie legt
+pro Tag eine CSV in `~/.local/state/corsair-control/` an (bzw.
+`/var/lib/corsair-control/` beim Dienst) und räumt nach der eingestellten
+Aufbewahrungszeit auf. „Verlauf als CSV exportieren“ schreibt den aktuell im
+Speicher gehaltenen Verlauf in eine Datei deiner Wahl.
 
 **Modi pro Kanal**
 
@@ -212,7 +266,7 @@ Der Dienst kann beim Beenden auf sichere Werte zurückstellen:
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/python -m pytest          # 61 Tests, laufen ohne Hardware
+.venv/bin/python -m pytest          # 132 Tests, laufen ohne Hardware
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests/test_ui.py
 ```
 
@@ -224,6 +278,11 @@ corsair_control/
 │   ├── device.py    Abstraktion über liquidctl (+ Demo-Hardware)
 │   ├── sensors.py   hwmon, nvidia-smi, virtuelle Sensoren
 │   ├── curve.py     Kurvenmodell, Interpolation, Hysterese
+│   ├── hwmon.py     Mainboard-Lüfter über /sys/class/hwmon
+│   ├── calibration.py  Kennlinien-Messung je Kanal
+│   ├── automation.py   Regeln für automatische Profilwahl
+│   ├── alarms.py    Pumpe/Lüfter/Temperatur überwachen
+│   ├── recorder.py  CSV-Aufzeichnung und Export
 │   ├── engine.py    Regelschleife, erzeugt Snapshots für die UI
 │   └── profile.py   Profile und deren Persistenz
 ├── ui/            # PyQt6: Fenster, Seiten, selbstgezeichnete Widgets

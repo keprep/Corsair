@@ -51,6 +51,7 @@ class CurveWidget(QWidget):
         self._selected: int | None = None
         self._live_temp: float | None = None
         self._live_duty: float | None = None
+        self._calibration = None
         self._temp_lo = 20.0
         self._temp_hi = 100.0
 
@@ -80,6 +81,11 @@ class CurveWidget(QWidget):
 
     def set_accent(self, colour: QColor | str) -> None:
         self._accent = QColor(colour)
+        self.update()
+
+    def set_calibration(self, calibration) -> None:
+        """Attach measured data so the plot can show the stall zone and RPM."""
+        self._calibration = calibration
         self.update()
 
     def set_live(self, temp: float | None, duty: float | None) -> None:
@@ -236,6 +242,7 @@ class CurveWidget(QWidget):
         self._paint_background(painter)
         if not self.compact:
             self._paint_grid(painter, rect)
+            self._paint_stall_zone(painter, rect)
 
         self._paint_curve(painter, rect)
 
@@ -285,6 +292,39 @@ class CurveWidget(QWidget):
                     f"{temp}°",
                 )
             temp += step
+
+    def _paint_stall_zone(self, painter: QPainter, rect: QRectF) -> None:
+        """Shade the duty range where this fan was measured to stand still."""
+        calibration = self._calibration
+        if calibration is None or calibration.stall_duty is None:
+            return
+
+        top = self._to_pixel(0, calibration.stall_duty).y()
+        band = QRectF(rect.left(), top, rect.width(), rect.bottom() - top)
+        colour = QColor(PALETTE.bad)
+        colour.setAlpha(28)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(colour))
+        painter.drawRect(band)
+
+        pen = QPen(QColor(PALETTE.bad))
+        pen.setWidthF(1.2)
+        pen.setStyle(Qt.PenStyle.DashLine)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(rect.left(), top), QPointF(rect.right(), top))
+
+        if calibration.start_duty is not None:
+            start_y = self._to_pixel(0, calibration.start_duty).y()
+            pen.setColor(QColor(PALETTE.warn))
+            painter.setPen(pen)
+            painter.drawLine(QPointF(rect.left(), start_y), QPointF(rect.right(), start_y))
+
+    def _rpm_hint(self, duty: float) -> str:
+        calibration = self._calibration
+        if calibration is None:
+            return ""
+        rpm = calibration.rpm_at(duty)
+        return "" if rpm is None else f" · {rpm:.0f} rpm"
 
     def _curve_path(self, rect: QRectF) -> QPainterPath:
         lo, hi = self._bounds()
@@ -339,7 +379,7 @@ class CurveWidget(QWidget):
                 self._paint_chip(
                     painter,
                     centre + QPointF(0, -22),
-                    f"{point.temp:.0f} °C · {point.duty:.0f} %",
+                    f"{point.temp:.0f} °C · {point.duty:.0f} %{self._rpm_hint(point.duty)}",
                 )
 
     def _paint_live(self, painter: QPainter, rect: QRectF) -> None:
@@ -367,7 +407,7 @@ class CurveWidget(QWidget):
         self._paint_chip(
             painter,
             QPointF(x, rect.top() + 12),
-            f"{self._live_temp:.1f} °C → {duty:.0f} %",
+            f"{self._live_temp:.1f} °C → {duty:.0f} %{self._rpm_hint(duty)}",
             background=colour,
         )
 

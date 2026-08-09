@@ -27,6 +27,7 @@ class CurvePanel(QFrame):
     """Curve plus the per-channel limits."""
 
     changed = pyqtSignal()
+    calibrationRequested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -96,6 +97,20 @@ class CurvePanel(QFrame):
         self.offload.stateChanged.connect(self._on_flags)
         layout.addWidget(self.offload)
 
+        calibration_row = QHBoxLayout()
+        calibration_row.setSpacing(8)
+        self.calibrate_button = QPushButton(tr("Calibrate fan"))
+        self.calibrate_button.setToolTip(
+            tr("Measures RPM per duty step, the stall point and the start-up duty.")
+        )
+        self.calibrate_button.clicked.connect(self.calibrationRequested)
+        calibration_row.addWidget(self.calibrate_button)
+        self.calibration_label = QLabel("")
+        self.calibration_label.setObjectName("Faint")
+        self.calibration_label.setWordWrap(True)
+        calibration_row.addWidget(self.calibration_label, 1)
+        layout.addLayout(calibration_row)
+
         self.placeholder = QLabel(tr("Channel"))
         self.placeholder.setObjectName("Faint")
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -118,7 +133,9 @@ class CurvePanel(QFrame):
 
         self.heading.setText(f"{tr('Curve editor')} · {title}")
         self.editor.set_curve(config.curve)
+        self.editor.set_calibration(config.calibration)
         self.editor.set_accent(QColor(PALETTE.pump if is_pump else PALETTE.accent))
+        self._show_calibration(config)
         self.min_spin.setValue(int(config.min_duty))
         self.max_spin.setValue(int(config.max_duty))
         self.zero_rpm.setChecked(config.allow_zero_rpm)
@@ -141,6 +158,23 @@ class CurvePanel(QFrame):
 
     def set_live(self, temp: float | None, duty: float | None) -> None:
         self.editor.set_live(temp, duty)
+
+    def _show_calibration(self, config: ChannelConfig) -> None:
+        calibration = config.calibration
+        if calibration is None or not calibration.ok:
+            self.calibration_label.setText(tr("Not calibrated"))
+            return
+        parts = [f"{tr('max')} {calibration.max_rpm:.0f} rpm"]
+        if calibration.stall_duty is not None:
+            parts.append(f"{tr('stops below')} {calibration.stall_duty:.0f} %")
+        if calibration.start_duty is not None:
+            parts.append(f"{tr('starts at')} {calibration.start_duty:.0f} %")
+        self.calibration_label.setText(" · ".join(parts))
+
+    def refresh_calibration(self) -> None:
+        if self._config is not None:
+            self.editor.set_calibration(self._config.calibration)
+            self._show_calibration(self._config)
 
     # ------------------------------------------------------------------
     def _on_curve_changed(self) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from PyQt6.QtCore import (
     QEasingCurve,
@@ -17,6 +18,7 @@ from PyQt6.QtGui import QAction, QCloseEvent, QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
+    QFileDialog,
     QGraphicsOpacityEffect,
     QHBoxLayout,
     QInputDialog,
@@ -36,8 +38,11 @@ from PyQt6.QtWidgets import (
 from corsair_control.core.config import Settings
 from corsair_control.core.engine import ControlEngine, Snapshot
 from corsair_control.core.profile import ProfileStore
+from corsair_control.core.recorder import export_history
+from corsair_control.ui.dialogs.calibration import CalibrationDialog
 from corsair_control.ui.i18n import tr
 from corsair_control.ui.icons import app_icon, fan_pixmap, glyph_icon, tray_icon
+from corsair_control.ui.pages.automation import AutomationPage
 from corsair_control.ui.pages.dashboard import DashboardPage
 from corsair_control.ui.pages.device_page import DevicePage
 from corsair_control.ui.pages.lighting import LightingPage
@@ -75,6 +80,7 @@ class MainWindow(QMainWindow):
         self._nav_pages: list[int] = []
         self._nav_items: dict[str, QListWidgetItem] = {}
         self._current_nav_row = 0
+        self._banner_shows_alarms = False
         self._fade: QPropertyAnimation | None = None
 
         self.setWindowTitle(f"{APP_NAME} {__version__}" + (" — Demo" if demo else ""))
@@ -138,10 +144,19 @@ class MainWindow(QMainWindow):
         )
         self.lighting_page = LightingPage()
         self.lighting_page.applyRequested.connect(self._apply_lighting)
-        self.settings_page = SettingsPage(self.settings)
+        self.lighting_page.screenRequested.connect(self._apply_screen)
+        self.lighting_page.syncRequested.connect(self._sync_lighting)
+
+        self.automation_page = AutomationPage(self.store.rules, self.store.names)
+        self.automation_page.set_enabled_state(self.store.automation_enabled)
+        self.automation_page.changed.connect(self._on_automation_changed)
+
+        self.settings_page = SettingsPage(self.settings, self.store.alarms)
         self.settings_page.settingsChanged.connect(self._on_settings_changed)
         self.settings_page.accentChanged.connect(self._on_accent_changed)
         self.settings_page.rescanRequested.connect(self.rescan)
+        self.settings_page.alarmsChanged.connect(self._on_alarms_changed)
+        self.settings_page.exportRequested.connect(self._export_history)
 
     def _build_sidebar(self) -> QWidget:
         sidebar = QWidget()
@@ -323,6 +338,7 @@ class MainWindow(QMainWindow):
             page.configChanged.connect(self._on_config_changed)
             page.overrideChanged.connect(self._on_override)
             page.pumpModeChanged.connect(self._on_pump_mode)
+            page.calibrationRequested.connect(self._calibrate)
             self.device_pages[device.key] = page
             index = self.stack.count()
             self.stack.addWidget(page)
@@ -332,6 +348,8 @@ class MainWindow(QMainWindow):
         self._nav_header(tr("System"))
         self.stack.addWidget(self.lighting_page)
         self._nav_entry(tr("Lighting"), "lighting", self.stack.count() - 1)
+        self.stack.addWidget(self.automation_page)
+        self._nav_entry(tr("Automation"), "clock", self.stack.count() - 1)
         self.stack.addWidget(self.settings_page)
         self._nav_entry(tr("Settings"), "settings", self.stack.count() - 1)
 
@@ -379,6 +397,7 @@ class MainWindow(QMainWindow):
         self.profile_box.blockSignals(False)
         self.profile_label.setText(f"{tr('Profile')}: {self.store.active_name}")
         self._refresh_tray_profiles()
+        self.automation_page.refresh_profiles()
 
     def _refresh_tray_profiles(self) -> None:
         if self.tray is None:
@@ -495,10 +514,95 @@ class MainWindow(QMainWindow):
             self.status_label.setText(error)
         self._schedule_save()
 
-    def _apply_lighting(self, device_key: str, channel_id: str, mode: str, colours: list) -> None:
-        error = self.engine.apply_lighting(device_key, channel_id, mode, colours)
+    def _apply_lighting(
+        self,
+        device_key: str,
+        channel_id: str,
+        mode: str,
+        colours: list,
+        speed: object = None,
+        direction: object = None,
+    ) -> None:
+        error = self.engine.apply_lighting(
+            device_key,
+            channel_id,
+            mode,
+            colours,
+            speed=speed if isinstance(speed, str) else None,
+            direction=direction if isinstance(direction, str) else None,
+        )
         self.lighting_page.show_result(device_key, error)
         self._schedule_save()
+
+    def _apply_screen(self, device_key: str, channel_id: str, mode: str, value: str) -> None:
+        error = self.engine.apply_screen(device_key, channel_id, mode, value)
+        self.lighting_page.show_result(device_key, error)
+        self._schedule_save()
+
+    def _sync_lighting(self) -> None:
+        """Push the first device's lighting settings to every other device."""
+        settings = self.lighting_page.first_settings()
+        if settings is None:
+            return
+        mode, colours, speed, direction = settings
+        failures = 0
+        for device_key, channels in self.lighting_page.devices_with_lighting():
+            for channel_id in channels:
+                error = self.engine.apply_lighting(
+                    device_key,
+                    channel_id,
+                    mode,
+                    colours,
+                    speed=speed if isinstance(speed, str) else None,
+                    direction=direction if isinstance(direction, str) else None,
+                )
+                if error:
+                    failures += 1
+                    self.lighting_page.show_result(device_key, error)
+        if not failures:
+            self._toast(tr("Applied"))
+        self._schedule_save()
+
+    def _calibrate(self, device_key: str, channel_id: str) -> None:
+        page = self.device_pages.get(device_key)
+        label = channel_id
+        if page is not None:
+            card = page.cards.get(channel_id)
+            if card is not None:
+                label = card.title.text()
+        dialog = CalibrationDialog(self.engine, device_key, channel_id, label, self)
+        if dialog.exec() and page is not None:
+            page.calibration_finished()
+            card = page.cards.get(channel_id)
+            if card is not None:
+                card.sync_from_config()
+            self._toast(tr("Calibration stored"))
+        self._schedule_save()
+
+    def _on_automation_changed(self) -> None:
+        self.store.automation_enabled = self.automation_page.enabled.isChecked()
+        self.engine.automation.enabled = self.store.automation_enabled
+        self.engine.automation.rules = self.store.rules
+        self._schedule_save()
+
+    def _on_alarms_changed(self) -> None:
+        self.engine.alarms.settings = self.store.alarms
+        self.engine.alarms.clear()
+        self._schedule_save()
+
+    def _export_history(self) -> None:
+        default = str(Path.home() / "corsair-control-history.csv")
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("Export history as CSV…"), default, "CSV (*.csv)"
+        )
+        if not path:
+            return
+        try:
+            rows = export_history(self.engine.sensors, Path(path))
+        except OSError as exc:
+            self.status_label.setText(str(exc))
+            return
+        self._toast(f"{tr('Saved')} · {rows} {tr('rows')}")
 
     def _toggle_pause(self) -> None:
         self.engine.pause(not self.engine.paused)
@@ -576,7 +680,15 @@ class MainWindow(QMainWindow):
                     colour = PALETTE.text_dim
                 item.setIcon(glyph_icon(glyph, colour, 18))
 
-        if snapshot.emergency:
+        self._show_alarms(snapshot)
+        self.automation_page.highlight(snapshot.automation_rule)
+
+        if snapshot.alarms:
+            first = snapshot.alarms[0]
+            self.status_label.setText(first.message)
+            colour = PALETTE.bad if first.severity == "critical" else PALETTE.warn
+            self.status_label.setStyleSheet(f"color: {colour}; font-weight: 600;")
+        elif snapshot.emergency:
             self.status_label.setText(tr("Emergency: maximum cooling"))
             self.status_label.setStyleSheet(f"color: {PALETTE.bad}; font-weight: 600;")
         elif self.engine.paused:
@@ -601,6 +713,23 @@ class MainWindow(QMainWindow):
             self.tray.setToolTip(tip)
 
     # ------------------------------------------------------------------
+    def _show_alarms(self, snapshot: Snapshot) -> None:
+        """Alarms outrank the start-up banner: they are what needs attention."""
+        if snapshot.alarms:
+            self.banner.setText("\n".join(alarm.message for alarm in snapshot.alarms))
+            self.banner.setVisible(True)
+            self.banner_wrap.setVisible(True)
+        elif self._banner_shows_alarms:
+            self.banner.setText("")
+            self.banner.setVisible(False)
+            self.banner_wrap.setVisible(False)
+        self._banner_shows_alarms = bool(snapshot.alarms)
+
+        for alarm in snapshot.new_alarms:
+            log.warning("Alarm: %s", alarm.message)
+            if self.tray is not None:
+                self.tray.showMessage(APP_NAME, alarm.message, tray_icon(PALETTE.bad), 8000)
+
     def _restore_window(self) -> None:
         self.showNormal()
         self.raise_()

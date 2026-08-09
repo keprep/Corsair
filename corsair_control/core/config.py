@@ -75,6 +75,11 @@ class Settings:
     # Safety net: if any monitored temperature exceeds this value every
     # controlled channel is driven to 100 % regardless of its curve.
     emergency_temperature: float = 90.0
+    #: Include mainboard fan headers exposed through /sys/class/hwmon.
+    control_mainboard_fans: bool = True
+    #: Continuously append measurements to a daily CSV in the state directory.
+    record_history: bool = False
+    history_retention_days: int = 14
     extra: dict = field(default_factory=dict)
 
     @classmethod

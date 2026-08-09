@@ -24,6 +24,7 @@ from corsair_control.ui.icons import glyph_pixmap
 from corsair_control.ui.theme import PALETTE, mix
 from corsair_control.ui.widgets.curve_editor import CurveWidget
 from corsair_control.ui.widgets.gauge import Bar
+from corsair_control.ui.widgets.sensor_selector import SensorSelector
 
 MODE_LABELS = [
     (MODE_CURVE, "Curve"),
@@ -121,14 +122,10 @@ class ChannelCard(QFrame):
         self.mode_box.currentIndexChanged.connect(self._on_mode_changed)
         controls.addWidget(self.mode_box, 1)
 
-        self.sensor_box = QComboBox()
-        # Sensor labels get long ("Hydro H150i Elite Capellix · Liquid
-        # temperature"); without this the combo would dictate the card width.
-        self.sensor_box.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        self.sensor_box = SensorSelector(config, sensor_provider)
+        self.sensor_box.changed.connect(
+            lambda: self.configChanged.emit(self.device_key, self.channel_id)
         )
-        self.sensor_box.setMinimumContentsLength(10)
-        self.sensor_box.currentIndexChanged.connect(self._on_sensor_changed)
         controls.addWidget(self.sensor_box, 2)
         layout.addLayout(controls)
 
@@ -167,17 +164,7 @@ class ChannelCard(QFrame):
 
     # ------------------------------------------------------------------
     def refresh_sensor_list(self) -> None:
-        current = self.config.sensor_id
-        self.sensor_box.blockSignals(True)
-        self.sensor_box.clear()
-        for sensor in self._sensor_provider():
-            self.sensor_box.addItem(sensor.label, sensor.sensor_id)
-        index = self.sensor_box.findData(current)
-        if index >= 0:
-            self.sensor_box.setCurrentIndex(index)
-        elif self.sensor_box.count():
-            self.config.sensor_id = self.sensor_box.currentData()
-        self.sensor_box.blockSignals(False)
+        self.sensor_box.set_config(self.config)
 
     def set_selected(self, selected: bool) -> None:
         if selected == self._is_selected:
@@ -202,10 +189,6 @@ class ChannelCard(QFrame):
     def _on_mode_changed(self, index: int) -> None:
         self.config.mode = self.mode_box.itemData(index) or MODE_CURVE
         self._sync_visibility()
-        self.configChanged.emit(self.device_key, self.channel_id)
-
-    def _on_sensor_changed(self, index: int) -> None:
-        self.config.sensor_id = self.sensor_box.itemData(index)
         self.configChanged.emit(self.device_key, self.channel_id)
 
     def _on_slider(self, value: int) -> None:

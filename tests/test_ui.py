@@ -107,13 +107,13 @@ def test_curve_widget_renders(qapp):
 
 
 def test_window_builds_a_page_per_device(window):
-    # dashboard + two demo devices + lighting + settings
-    assert window.stack.count() == 5
+    # dashboard + two demo devices + lighting + automation + settings
+    assert window.stack.count() == 6
     assert len(window.device_pages) == 2
     # The navigation additionally carries two non-selectable section headers.
     selectable = [page for page in window._nav_pages if page >= 0]
-    assert selectable == [0, 1, 2, 3, 4]
-    assert window.nav.count() == len(window._nav_pages) == 7
+    assert selectable == [0, 1, 2, 3, 4, 5]
+    assert window.nav.count() == len(window._nav_pages) == 8
 
 
 def test_section_headers_are_not_selectable(window):
@@ -135,7 +135,7 @@ def test_accent_change_rebuilds_without_losing_devices(window):
     window._on_accent_changed("#22c4d6")
     assert window.settings.accent == "#22c4d6"
     assert len(window.device_pages) == 2
-    assert window.stack.count() == 5
+    assert window.stack.count() == 6
 
 
 def test_snapshot_updates_reach_the_widgets(window):

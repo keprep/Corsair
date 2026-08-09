@@ -61,6 +61,94 @@ GERMAN: dict[str, str] = {
         "Die Kurve wird einmal auf den Controller geschrieben und läuft dort "
         "weiter, auch wenn dieses Programm nicht läuft.",
     "Applied": "Angewendet",
+    # multi-sensor selection
+    "Pick a sensor": "Sensor wählen",
+    "Hottest": "Wärmster",
+    "Average": "Mittelwert",
+    "Weighted": "Gewichtet",
+    "When several are selected": "Wenn mehrere gewählt sind",
+    "Combined": "Kombiniert",
+    "Mainboard": "Mainboard",
+    "Storage": "Datenträger",
+    "Other": "Sonstige",
+    "Liquid": "Wasser",
+    # calibration
+    "Calibrate fan": "Lüfter kalibrieren",
+    "Measures RPM per duty step, the stall point and the start-up duty.":
+        "Misst die Drehzahl je Stufe, den Stillstandspunkt und die Anlaufleistung.",
+    "The channel is stepped from 100 % down to 0 % and back up. "
+    "This takes a minute or two and the fan will get loud, then stop.":
+        "Der Kanal wird von 100 % auf 0 % und wieder hoch gefahren. Das dauert ein "
+        "bis zwei Minuten; der Lüfter wird laut und bleibt zwischendurch stehen.",
+    "Not calibrated": "Nicht kalibriert",
+    "Calibration stored": "Kalibrierung gespeichert",
+    "max": "max.",
+    "stops below": "steht unter",
+    "starts at": "läuft an ab",
+    "Cancel": "Abbrechen",
+    "Cancelled": "Abgebrochen",
+    "Close": "Schließen",
+    "Stopping…": "Wird beendet …",
+    # automation
+    "Automation": "Automatik",
+    "Automatic profiles": "Automatische Profile",
+    "Enable automation": "Automatik aktivieren",
+    "Add rule": "Regel hinzufügen",
+    "Delete rule": "Regel löschen",
+    "Rule": "Regel",
+    "Rule name": "Regelname",
+    "Priority": "Priorität",
+    "Process": "Prozess",
+    "e.g. steam": "z. B. steam",
+    "Time": "Uhrzeit",
+    "Power": "Strom",
+    "Above": "Über",
+    "Any": "Egal",
+    "On mains": "Am Netz",
+    "On battery": "Im Akkubetrieb",
+    "Applies when": "Gilt wenn",
+    "No rules yet.": "Noch keine Regeln.",
+    "Add at least one condition, otherwise the rule never fires.":
+        "Mindestens eine Bedingung angeben, sonst greift die Regel nie.",
+    "The highest-priority rule that matches wins. When no rule matches, "
+    "the profile you last picked by hand is restored.":
+        "Es gewinnt die passende Regel mit der höchsten Priorität. Passt keine "
+        "Regel, wird das zuletzt von Hand gewählte Profil wiederhergestellt.",
+    # lighting and screen
+    "Animation speed": "Geschwindigkeit",
+    "Direction": "Richtung",
+    "Display": "Display",
+    "Image or GIF path": "Bild- oder GIF-Pfad",
+    "Apply to all devices": "Auf alle Geräte anwenden",
+    "Click to change, right-click to remove":
+        "Klicken zum Ändern, Rechtsklick zum Entfernen",
+    "No device with controllable lighting was found.":
+        "Es wurde kein Gerät mit steuerbarer Beleuchtung gefunden.",
+    "slowest": "sehr langsam",
+    "slower": "langsam",
+    "normal": "normal",
+    "faster": "schnell",
+    "fastest": "sehr schnell",
+    "forward": "vorwärts",
+    "backward": "rückwärts",
+    # alarms, recording, hwmon
+    "Alarms": "Alarme",
+    "Enable alarms": "Alarme aktivieren",
+    "Warn below pump speed": "Warnen unter Pumpendrehzahl",
+    "Fan counts as stalled above": "Lüfter gilt als blockiert ab",
+    "Warn above temperature": "Warnen über Temperatur",
+    "A condition must hold for a few seconds before it raises an alarm.":
+        "Eine Bedingung muss einige Sekunden anhalten, bevor sie Alarm auslöst.",
+    "Recording": "Aufzeichnung",
+    "Record measurements to CSV": "Messwerte in CSV aufzeichnen",
+    "Keep recordings for": "Aufzeichnungen aufbewahren",
+    "Export history as CSV…": "Verlauf als CSV exportieren …",
+    "Folder": "Ordner",
+    "days": "Tage",
+    "rows": "Zeilen",
+    "Also control mainboard fans (hwmon)": "Auch Mainboard-Lüfter steuern (hwmon)",
+    "Mainboard headers need root - use the corsair-controld service for them.":
+        "Mainboard-Anschlüsse brauchen root – dafür den Dienst corsair-controld nutzen.",
     "Switch this channel to curve mode to edit it.":
         "Diesen Kanal auf den Modus „Kurve“ stellen, um ihn zu bearbeiten.",
     "Still running in the background - fan control stays active.":

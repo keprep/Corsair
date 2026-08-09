@@ -36,6 +36,7 @@ class DevicePage(QWidget):
     configChanged = pyqtSignal(str, str)  # device_key, channel_id
     overrideChanged = pyqtSignal(str, str, object)
     pumpModeChanged = pyqtSignal(str, str)
+    calibrationRequested = pyqtSignal(str, str)
 
     def __init__(
         self,
@@ -77,6 +78,7 @@ class DevicePage(QWidget):
 
         self.panel = CurvePanel()
         self.panel.changed.connect(self._on_panel_changed)
+        self.panel.calibrationRequested.connect(self._on_calibration_requested)
         splitter.addWidget(self.panel)
         splitter.setSizes([620, 480])
         outer.addWidget(splitter, 1)
@@ -192,6 +194,13 @@ class DevicePage(QWidget):
         if card is not None:
             card.preview.update()
         self.configChanged.emit(self.device.key, self._selected)
+
+    def _on_calibration_requested(self) -> None:
+        if self._selected:
+            self.calibrationRequested.emit(self.device.key, self._selected)
+
+    def calibration_finished(self) -> None:
+        self.panel.refresh_calibration()
 
     def _on_pump_mode(self, index: int) -> None:
         mode = self.pump_box.itemData(index)

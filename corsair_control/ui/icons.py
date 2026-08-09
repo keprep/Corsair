@@ -124,6 +124,28 @@ def _glyph_chart(painter: QPainter, colour: QColor) -> None:
     painter.drawPath(path)
 
 
+def _glyph_clock(painter: QPainter, colour: QColor) -> None:
+    _stroke(painter, colour)
+    painter.drawEllipse(QPointF(12, 12), 8.4, 8.4)
+    painter.drawLine(QPointF(12, 6.8), QPointF(12, 12))
+    painter.drawLine(QPointF(12, 12), QPointF(15.8, 14.2))
+
+
+def _glyph_bell(painter: QPainter, colour: QColor) -> None:
+    _stroke(painter, colour)
+    path = QPainterPath()
+    path.moveTo(5.6, 16.4)
+    path.lineTo(18.4, 16.4)
+    path.lineTo(16.6, 13.8)
+    path.lineTo(16.6, 10.4)
+    path.cubicTo(16.6, 7.0, 14.4, 5.2, 12.0, 5.2)
+    path.cubicTo(9.6, 5.2, 7.4, 7.0, 7.4, 10.4)
+    path.lineTo(7.4, 13.8)
+    path.closeSubpath()
+    painter.drawPath(path)
+    painter.drawLine(QPointF(10.4, 18.6), QPointF(13.6, 18.6))
+
+
 def _glyph_pause(painter: QPainter, colour: QColor) -> None:
     _fill(painter, colour)
     painter.drawRoundedRect(QRectF(7.0, 5.5, 3.6, 13.0), 1.6, 1.6)
@@ -150,6 +172,8 @@ GLYPHS = {
     "cpu": _glyph_cpu,
     "gpu": _glyph_gpu,
     "chart": _glyph_chart,
+    "clock": _glyph_clock,
+    "bell": _glyph_bell,
     "pause": _glyph_pause,
     "play": _glyph_play,
 }

@@ -81,6 +81,12 @@ def print_inventory(engine: ControlEngine) -> int:
         if device.supports_lighting:
             channels = ", ".join(c.channel_id for c in device.lighting_channels)
             print(f"  lighting   : {channels}")
+        if device.supports_screen:
+            channels = ", ".join(c.channel_id for c in device.screen_channels)
+            print(f"  screen     : {channels}")
+        if device.is_hwmon:
+            controllable = sum(1 for c in device.channels if c.controllable)
+            print(f"  writable   : {controllable}/{len(device.channels)} channels")
         for name, value in device.last_status.temperatures.items():
             print(f"  temp       : {name} = {value:.1f} °C")
         for channel in device.channels:

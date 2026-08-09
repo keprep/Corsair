@@ -1,7 +1,9 @@
 import pytest
 
+from corsair_control.core.automation import Rule
 from corsair_control.core.config import Settings
 from corsair_control.core.curve import CurvePoint, FanCurve
+from corsair_control.core.device import DeviceError
 from corsair_control.core.engine import ControlEngine
 from corsair_control.core.profile import MODE_FIXED, MODE_MANUAL, ProfileStore
 
@@ -138,3 +140,85 @@ def test_profile_switch_changes_the_target(engine):
 
     assert performance is not None and silent is not None
     assert performance > silent
+
+
+def test_channel_can_follow_two_sensors(engine):
+    device = engine.devices[0]
+    config = engine.store.active.device(device.key).channel("fan1")
+    config.min_duty = 0
+    config.max_duty = 100
+    config.allow_zero_rpm = True
+    config.curve = FanCurve([CurvePoint(0, 0), CurvePoint(100, 100)])
+    config.set_sensor_ids(["demo:cpu", "demo:gpu"])
+
+    snapshot = engine.tick()
+    channel = next(
+        c for c in snapshot.devices[0].channels if c.channel_id == "fan1"
+    )
+    hottest = max(engine.sensors.value("demo:cpu"), engine.sensors.value("demo:gpu"))
+    assert channel.sensor_value == hottest
+    assert "+" in channel.sensor_label
+
+
+def test_automation_switches_the_profile(engine):
+    engine.store.rules = [Rule(name="hot", profile="Performance", temperature_above=0.0)]
+    engine.automation.rules = engine.store.rules
+    engine.automation.enabled = True
+
+    engine.tick()
+    assert engine.store.active_name == "Performance"
+    assert engine.snapshot.automation_rule == "hot"
+
+
+def test_automation_stays_out_of_the_way_when_disabled(engine):
+    engine.store.rules = [Rule(name="hot", profile="Performance", temperature_above=0.0)]
+    engine.automation.rules = engine.store.rules
+    engine.automation.enabled = False
+
+    before = engine.store.active_name
+    engine.tick()
+    assert engine.store.active_name == before
+
+
+def test_alarms_reach_the_snapshot(engine):
+    engine.alarms.settings.debounce_seconds = 0.0
+    engine.alarms.settings.pump_minimum_rpm = 99_000
+
+    snapshot = engine.tick()
+    assert any(alarm.kind == "pump_slow" for alarm in snapshot.alarms)
+    assert snapshot.new_alarms
+
+
+def test_calibration_excludes_the_channel_from_control(engine):
+    device = engine.devices[0]
+    config = engine.store.active.device(device.key).channel("fan1")
+    config.mode = MODE_FIXED
+    config.fixed_duty = 80
+    config.min_duty = 0
+
+    engine._calibrating.add((device.key, "fan1"))
+    device._applied.clear()
+    engine.tick()
+    assert device.applied_duty("fan1") is None
+
+    engine._calibrating.clear()
+    engine.tick()
+    assert device.applied_duty("fan1") == 80
+
+
+def test_calibration_stores_the_result_and_raises_the_floor(engine):
+    device = engine.devices[0]
+    result = engine.calibrate(
+        device.key, "fan1", settle_seconds=0.0, samples=1, sample_interval=0.0
+    )
+
+    config = engine.store.active.device(device.key).channel("fan1")
+    assert config.calibration is not None
+    assert config.calibration.max_rpm > 0
+    if result.stall_duty is not None:
+        assert config.min_duty >= result.stall_duty
+
+
+def test_calibration_rejects_an_unknown_channel(engine):
+    with pytest.raises(DeviceError):
+        engine.calibrate(engine.devices[0].key, "fan9")
